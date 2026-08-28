@@ -72,3 +72,53 @@ def test_an_undefined_hop_stops_a_composition_early():
 def test_no_rows_is_a_parse_error():
     with pytest.raises(ParseError):
         build([], {"x": 1})
+
+
+def test_a_bound_variable_other_than_x_is_not_baked_into_the_curve():
+    # parse_definitions accepts any identifier. Substituting the literal "x"
+    # instead of the row's own variable plotted f(t) = a*t as a flat line at 15.
+    sequence = build(["f(t) = a*t"], {"x": 3, "a": 5})
+    points = sequence.steps[0].visual.data["curves"][0]["points"]
+
+    assert points[0][1] == -50.0
+    assert points[-1][1] == 50.0
+    assert sequence.steps[-1].title == "f(3) = 15"
+
+
+def test_the_bound_variable_is_not_offered_as_a_slider():
+    sequence = build(["f(t) = a*t"], {"x": 3, "a": 5})
+
+    assert sequence.steps[0].visual.data["parameters"] == ["a"]
+
+
+def test_a_composition_across_different_variable_names():
+    rows = ["f(t) = 2t", "g(u) = u^2", "h(v) = f(g(v))"]
+
+    sequence = build(rows, {"x": 4})
+
+    assert _titles(sequence)[2:] == ["g(4) = 16", "f(16) = 32"]
+
+
+def test_overflow_is_worded_differently_from_undefined():
+    # 2^1024 exists and merely exceeds float64, so "check the domain" of 2^x
+    # would be false advice.
+    rows = ["f(x) = 2^x", "g(x) = 2^x", "h(x) = g(f(x))"]
+
+    sequence = build(rows, {"x": 10})
+
+    assert sequence.steps[-1].title == "g(1024) is too large to show"
+
+
+def test_a_non_numeric_parameter_is_a_parse_error():
+    with pytest.raises(ParseError):
+        build(["f(x) = x + 1"], {"x": "banana"})
+
+
+def test_later_hops_narrate_the_move_back_to_the_x_axis():
+    rows = ["f(x) = 2x", "g(x) = x^2", "h(x) = f(g(x))"]
+
+    sequence = build(rows, {"x": 4})
+
+    assert "starts on the x-axis" in sequence.steps[1].prose
+    assert "Up from the x-axis" in sequence.steps[2].prose
+    assert "becomes the next input" in sequence.steps[3].prose
