@@ -1185,6 +1185,14 @@ def test_big_o_step_classifies_each_row():
     assert "n^2" in sequence.steps[4].prose
 
 
+def test_identical_functions_produce_no_crossover_markers():
+    # Comparing a function against itself is a plausible slip in a row-based
+    # picker. Before the Task 6 fix this produced one marker per scan step.
+    sequence = build(["n^2", "n^2"], {})
+
+    assert sequence.steps[2].visual.data["markers"] == []
+
+
 def test_no_rows_is_a_parse_error():
     with pytest.raises(ParseError):
         build([], {})
@@ -1381,7 +1389,7 @@ register_topic("growth", build)
 uv run pytest tests/test_growth.py -v
 ```
 
-Expected: 8 passed
+Expected: 9 passed
 
 - [ ] **Step 5: Commit**
 
@@ -2460,12 +2468,29 @@ function showError(detail) {
   errorBox.textContent = `${detail.input}\n${caret}\n${detail.error}`;
 }
 
+// A full growth build is real SymPy work - measured 87 ms for the default four
+// functions and 143 ms for six including n!. Firing on every keystroke or
+// slider tick would queue requests faster than they finish, so input is
+// debounced into one request, and stale replies are discarded: without the
+// requestId guard a slow earlier request can land after a fast later one and
+// overwrite the newer result with older data.
+const DEBOUNCE_MS = 180;
+let debounceTimer = null;
+let requestId = 0;
+
+function scheduleRefresh() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(refresh, DEBOUNCE_MS);
+}
+
 async function refresh() {
+  const mine = ++requestId;
   const response = await fetch("/api/sequence", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ topic: topic(), rows, params }),
   });
+  if (mine !== requestId) return;
 
   if (!response.ok) {
     showError((await response.json()).detail);
@@ -2492,7 +2517,7 @@ function renderRows() {
 
     const input = document.createElement("input");
     input.value = value;
-    input.oninput = () => { rows[i] = input.value; refresh(); };
+    input.oninput = () => { rows[i] = input.value; scheduleRefresh(); };
 
     row.append(swatch, input);
     rowsBox.append(row);
@@ -2514,7 +2539,7 @@ function renderParams() {
     slider.step = name === "n_max" ? 5 : 0.1;
     slider.value = params[name] ?? (name === "n_max" ? 50 : 1);
     params[name] = Number(slider.value);
-    slider.oninput = () => { params[name] = Number(slider.value); refresh(); };
+    slider.oninput = () => { params[name] = Number(slider.value); scheduleRefresh(); };
     label.append(slider);
     paramsBox.append(label);
   }
@@ -2527,7 +2552,7 @@ function renderParams() {
     slider.min = -10; slider.max = 10; slider.step = 0.5;
     slider.value = params.x ?? 4;
     params.x = Number(slider.value);
-    slider.oninput = () => { params.x = Number(slider.value); refresh(); };
+    slider.oninput = () => { params.x = Number(slider.value); scheduleRefresh(); };
     label.append(slider);
     paramsBox.append(label);
   }
