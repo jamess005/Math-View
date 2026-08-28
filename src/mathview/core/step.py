@@ -25,6 +25,9 @@ class VisualSpec:
     data: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        # Flattened, not nested: renderers key off "kind" and read their fields
+        # directly, with no `data` unwrap. Nesting would look tidier and break
+        # every renderer.
         return {"kind": self.kind, **self.data}
 
 
