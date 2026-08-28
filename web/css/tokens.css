@@ -18,6 +18,8 @@
   /* Ground */
   --page: #08080a;
   --panel: #121215;
+  --panel-hi: #17171b;  /* header gradient top - a shade above --panel */
+  --panel-lo: #0e0e11;  /* step-panel gradient foot - toward --page   */
   --input: #1c1c21;
   --grid: #2a2a31;
   --border: rgba(255, 255, 255, 0.07);
