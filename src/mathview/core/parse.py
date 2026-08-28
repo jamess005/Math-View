@@ -35,8 +35,10 @@ _SAFE_GLOBALS: dict[str, object] = {
 }
 _SAFE_GLOBALS["__builtins__"] = {}
 
-# Anything of the form `name(` in user text.
-_CALL = re.compile(r"\b([A-Za-z]\w*)\s*\(")
+# Anything of the form `name(` in user text. `\b` will not do: it is not a
+# boundary between two word characters, and a digit is one - so `2f(x)` would
+# hide the call entirely and slip straight back into being the product 2*f*x.
+_CALL = re.compile(r"(?:(?<=[^A-Za-z_])|^)([A-Za-z]\w*)\s*\(")
 
 
 class ParseError(Exception):
@@ -50,6 +52,16 @@ class ParseError(Exception):
 
     def to_dict(self) -> dict[str, object]:
         return {"error": self.message, "offset": self.offset, "input": self.text}
+
+
+def is_builtin_name(name: str) -> bool:
+    """True if `name` already means something in SymPy's namespace.
+
+    Definitions must refuse these. SymPy's parser rewrites bare identifiers into
+    Symbol(...) calls, so a row named `Symbol` intercepts those and corrupts the
+    parse of every other row; shadowing `log` or `sqrt` is merely confusing.
+    """
+    return name in _SAFE_GLOBALS
 
 
 def parse_expression(
@@ -70,7 +82,12 @@ def parse_expression(
     known = functions or {}
     for match in _CALL.finditer(stripped):
         name = match.group(1)
-        if name not in known and name not in _SAFE_GLOBALS:
+        if name in known:
+            continue
+        # Membership in the SymPy namespace is not enough: pi, E, I, oo and nan
+        # are all names there but none are callable, so `nan(x)` quietly became
+        # `nan` with the argument dropped entirely.
+        if not callable(_SAFE_GLOBALS.get(name)):
             raise ParseError(
                 f"no function named {name} is defined yet", match.start(1), text
             )

@@ -87,3 +87,18 @@ def test_calling_an_undefined_function_is_rejected():
 
     assert "g" in excinfo.value.message
     assert excinfo.value.offset == 2
+
+
+def test_a_digit_prefixed_call_is_still_checked():
+    # `\b` is not a boundary between two word characters, and a digit is one,
+    # so `2f(x)` hid the call entirely and became the product 2*f*x.
+    with pytest.raises(ParseError):
+        parse_expression("2f(x)", "x")
+
+
+def test_non_callable_sympy_names_are_rejected():
+    # pi, E, I, oo and nan are all names in SymPy's namespace but none are
+    # callable; nan(x) quietly became nan, dropping the argument entirely.
+    for text in ["E(x)", "pi(x)", "nan(x)", "oo(x)"]:
+        with pytest.raises(ParseError):
+            parse_expression(text, "x")

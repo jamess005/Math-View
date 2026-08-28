@@ -12,16 +12,9 @@ from dataclasses import dataclass
 import sympy
 from sympy.core.function import AppliedUndef
 
-from mathview.core.parse import ParseError, parse_expression
+from mathview.core.parse import ParseError, is_builtin_name, parse_expression
 
 _LHS = re.compile(r"^\s*([A-Za-z]\w*)\s*\(\s*([A-Za-z]\w*)\s*\)\s*$")
-
-# Bounds substitution so a cycle terminates with an error instead of hanging.
-# parse_definitions only lets a row call names defined on earlier rows, so the
-# reference graph it produces is a DAG and a cycle can't reach this guard that
-# way; it stays as defence for a Definition dict built by hand rather than
-# through parse_definitions.
-_MAX_EXPANSIONS = 16
 
 
 @dataclass(frozen=True)
@@ -48,6 +41,10 @@ def parse_definitions(rows: list[str]) -> dict[str, Definition]:
             raise ParseError("the left side must look like f(x)", 0, row)
 
         name, variable = match.group(1), match.group(2)
+        if name in definitions:
+            raise ParseError(f"{name} is already defined above", 0, row)
+        if is_builtin_name(name):
+            raise ParseError(f"{name} is a built-in name, choose another", 0, row)
         # Only names defined on EARLIER rows are callable here. That ordering is
         # what makes a forward reference an error rather than a silent product:
         # with `g` undeclared, implicit multiplication reads `g(x)` as `g * x`.
@@ -62,7 +59,11 @@ def parse_definitions(rows: list[str]) -> dict[str, Definition]:
 
 def expand(expr: sympy.Expr, definitions: dict[str, Definition]) -> sympy.Expr:
     """Replace every call to a defined name with that definition's body."""
-    for _ in range(_MAX_EXPANSIONS):
+    # One pass resolves one level of nesting, and a row can only call rows above
+    # it, so the chain is never deeper than the number of definitions. The bound
+    # is belt-and-braces for a hand-built dict containing a cycle; it cannot be
+    # reached through parse_definitions.
+    for _ in range(len(definitions) + 1):
         calls = [
             call
             for call in expr.atoms(AppliedUndef)
@@ -77,6 +78,4 @@ def expand(expr: sympy.Expr, definitions: dict[str, Definition]) -> sympy.Expr:
             )
             expr = expr.subs(call, substituted)
 
-    raise ParseError(
-        "these definitions refer to each other in a circle", 0, str(expr)
-    )
+    raise ParseError("these definitions nest too deeply to resolve", 0, str(expr))

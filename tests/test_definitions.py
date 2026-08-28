@@ -72,3 +72,31 @@ def test_a_parameter_is_not_mistaken_for_a_function():
 def test_no_rows_is_a_parse_error():
     with pytest.raises(ParseError):
         parse_definitions([])
+
+
+def test_a_builtin_name_cannot_be_redefined():
+    # SymPy's parser rewrites bare identifiers into Symbol(...) calls, so a row
+    # named Symbol intercepts those and corrupts every other row's parse.
+    with pytest.raises(ParseError):
+        parse_definitions(["Symbol(x) = x^2", "g(x) = x + 1"])
+
+
+def test_shadowing_a_sympy_function_is_rejected():
+    with pytest.raises(ParseError):
+        parse_definitions(["log(x) = x^2"])
+
+
+def test_a_repeated_name_is_rejected():
+    # Keeping only the last would retroactively change what earlier rows mean:
+    # g, written against f(x) = x, would expand using f(x) = 2x.
+    with pytest.raises(ParseError):
+        parse_definitions(["f(x) = x", "g(x) = f(x) + 1", "f(x) = 2x"])
+
+
+def test_deep_nesting_is_not_reported_as_a_circle():
+    # 17 strictly acyclic levels used to hit a fixed bound of 16 and be
+    # reported as a circular reference.
+    rows = ["f1(x) = x + 1"] + [f"f{i}(x) = f{i - 1}(x) + 1" for i in range(2, 18)]
+    definitions = parse_definitions(rows)
+
+    assert expand(definitions["f17"].body, definitions) == sympy.Symbol("x") + 17
