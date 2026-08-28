@@ -782,6 +782,27 @@ def test_exponential_and_quadratic_cross_twice():
     # after n = 4 does the exponential pull away for good. Verified against
     # SymPy before this plan was written.
     assert crossings == [2.0, 4.0]
+
+
+def test_identical_functions_report_no_crossing():
+    # Without the "leaving zero" guard this returns one crossing per scan step -
+    # 600 markers smeared across the plot for a plausible user slip.
+    n = sympy.Symbol("n")
+
+    assert find_crossovers(n**2, n**2, "n", 1.0, 50.0) == []
+
+
+def test_a_crossing_exactly_at_start_is_reported():
+    n = sympy.Symbol("n")
+
+    assert find_crossovers(n, sympy.Integer(5), "n", 5.0, 15.0) == [5.0]
+
+
+def test_a_crossing_exactly_at_stop_is_reported():
+    # The asymmetric case: a zero at `stop` never becomes `previous`.
+    n = sympy.Symbol("n")
+
+    assert find_crossovers(n, sympy.Integer(15), "n", 5.0, 15.0) == [15.0]
 ```
 
 This is exactly the confusion the crossover step exists to clear up: "exponential
@@ -832,14 +853,16 @@ def _difference(expr_a: sympy.Expr, expr_b: sympy.Expr, variable: str):
     return evaluate
 
 
-def _bisect(evaluate, low: float, high: float) -> float:
-    low_value = evaluate(low)
+def _bisect(evaluate, low: float, low_value: float, high: float) -> float:
+    # `low_value` is passed in rather than recomputed: the caller already has it,
+    # and guarding a None here would be an unsound branch that can silently
+    # converge on a bogus root.
     for _ in range(_BISECT_STEPS):
         middle = (low + high) / 2
         middle_value = evaluate(middle)
         if middle_value is None or abs(middle_value) < _TOLERANCE:
             return middle
-        if (middle_value > 0) == (low_value is not None and low_value > 0):
+        if (middle_value > 0) == (low_value > 0):
             low, low_value = middle, middle_value
         else:
             high = middle
@@ -864,10 +887,21 @@ def find_crossovers(
         x = start + step * i
         current = evaluate(x)
         if previous is not None and current is not None:
-            if previous == 0.0:
-                crossings.append(previous_x)
+            # `+ 0.0` throughout normalises -0.0 to 0.0, so a crossing at the
+            # origin never renders as "n = -0".
+            if previous == 0.0 and current != 0.0:
+                # Only when the difference is LEAVING zero. Without that guard,
+                # two identical functions report one crossing per scan step.
+                crossings.append(previous_x + 0.0)
             elif (previous > 0) != (current > 0):
-                crossings.append(round(_bisect(evaluate, previous_x, x), 9))
+                crossings.append(
+                    round(_bisect(evaluate, previous_x, previous, x), 9) + 0.0
+                )
+            elif current == 0.0 and i == _SCAN_STEPS and previous != 0.0:
+                # A zero exactly at `stop` never becomes `previous`, and `0 > 0`
+                # is False so it reads as no sign change against a negative
+                # sample either. The right edge needs its own probe.
+                crossings.append(x + 0.0)
         previous_x, previous = x, current
 
     return crossings
@@ -879,7 +913,7 @@ def find_crossovers(
 uv run pytest tests/test_crossover.py -v
 ```
 
-Expected: 3 passed
+Expected: 6 passed
 
 - [ ] **Step 5: Commit**
 
