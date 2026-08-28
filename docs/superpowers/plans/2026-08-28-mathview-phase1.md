@@ -393,6 +393,16 @@ def test_non_callable_sympy_names_are_rejected():
     for text in ["E(x)", "pi(x)", "nan(x)", "oo(x)"]:
         with pytest.raises(ParseError):
             parse_expression(text, "x")
+
+
+def test_bracket_errors_are_readable():
+    # tokenize.TokenError stringifies as a raw Python tuple, and the API hands
+    # this message straight to the UI.
+    for text in ["(1+2", "1+2)", "((n", "sqrt(x"]:
+        with pytest.raises(ParseError) as excinfo:
+            parse_expression(text, "n")
+
+        assert excinfo.value.message == "check the brackets - they do not match"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -416,6 +426,7 @@ silently empty graph reaching the user is a bug.
 from __future__ import annotations
 
 import re
+from tokenize import TokenError
 
 import sympy
 from sympy.parsing.sympy_parser import (
@@ -520,6 +531,12 @@ def parse_expression(
         raise ParseError(
             f"unexpected syntax near here: {exc.msg}", offset, text
         ) from exc
+    except (TokenError, IndexError) as exc:
+        # Unmatched brackets surface as tokenize.TokenError (too few closers) or
+        # IndexError (too many), and neither stringifies into anything a reader
+        # can act on - TokenError renders as a raw Python tuple, which the UI
+        # would show verbatim.
+        raise ParseError("check the brackets - they do not match", 0, text) from exc
     except Exception as exc:
         # parse_expr is an eval-based third-party parser and its failure
         # vocabulary is not a stable contract: unmatched parentheses alone
@@ -546,7 +563,7 @@ def free_parameters(expr: sympy.Expr, variable: str) -> list[str]:
 uv run pytest tests/test_parse.py -v
 ```
 
-Expected: 13 passed
+Expected: 14 passed
 
 - [ ] **Step 5: Commit**
 
@@ -2193,6 +2210,42 @@ def test_index_is_served():
 
     assert response.status_code == 200
     assert "MathView" in response.text
+
+
+def test_unmatched_brackets_return_a_readable_400():
+    response = client.post(
+        "/api/sequence", json={"topic": "growth", "rows": ["(1+2"], "params": {}}
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error"] == "check the brackets - they do not match"
+
+
+def test_too_many_rows_returns_400():
+    response = client.post(
+        "/api/sequence", json={"topic": "growth", "rows": ["n"] * 7, "params": {}}
+    )
+
+    assert response.status_code == 400
+
+
+def test_a_non_positive_range_returns_400():
+    response = client.post(
+        "/api/sequence",
+        json={"topic": "growth", "rows": ["n"], "params": {"n_max": 0}},
+    )
+
+    assert response.status_code == 400
+
+
+def test_the_functions_topic_is_reachable():
+    response = client.post(
+        "/api/sequence",
+        json={"topic": "functions", "rows": ["f(x) = 2x + 3"], "params": {"x": 4}},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["steps"][-1]["title"] == "f(4) = 11"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -2274,7 +2327,7 @@ printf '<!doctype html><title>MathView</title>\n' > web/index.html
 uv run pytest tests/test_server.py -v
 ```
 
-Expected: 5 passed
+Expected: 9 passed
 
 - [ ] **Step 6: Commit**
 
