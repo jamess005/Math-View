@@ -31,14 +31,13 @@ def _difference(expr_a: sympy.Expr, expr_b: sympy.Expr, variable: str):
     return evaluate
 
 
-def _bisect(evaluate, low: float, high: float) -> float:
-    low_value = evaluate(low)
+def _bisect(evaluate, low: float, low_value: float, high: float) -> float:
     for _ in range(_BISECT_STEPS):
         middle = (low + high) / 2
         middle_value = evaluate(middle)
         if middle_value is None or abs(middle_value) < _TOLERANCE:
             return middle
-        if (middle_value > 0) == (low_value is not None and low_value > 0):
+        if (middle_value > 0) == (low_value > 0):
             low, low_value = middle, middle_value
         else:
             high = middle
@@ -63,10 +62,21 @@ def find_crossovers(
         x = start + step * i
         current = evaluate(x)
         if previous is not None and current is not None:
-            if previous == 0.0:
-                crossings.append(previous_x)
+            # `+ 0.0` throughout normalises -0.0 to 0.0, so a crossing at the
+            # origin never renders as "n = -0".
+            if previous == 0.0 and current != 0.0:
+                # Only when the difference is LEAVING zero. Without that guard,
+                # two identical functions report one crossing per scan step.
+                crossings.append(previous_x + 0.0)
             elif (previous > 0) != (current > 0):
-                crossings.append(round(_bisect(evaluate, previous_x, x), 9))
+                crossings.append(
+                    round(_bisect(evaluate, previous_x, previous, x), 9) + 0.0
+                )
+            elif current == 0.0 and i == _SCAN_STEPS and previous != 0.0:
+                # A zero exactly at `stop` never becomes `previous`, and `0 > 0`
+                # is False so it reads as no sign change against a negative
+                # sample either. The right edge needs its own probe.
+                crossings.append(x + 0.0)
         previous_x, previous = x, current
 
     return crossings
