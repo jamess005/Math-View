@@ -32,6 +32,9 @@ def _difference(expr_a: sympy.Expr, expr_b: sympy.Expr, variable: str):
 
 
 def _bisect(evaluate, low: float, low_value: float, high: float) -> float:
+    # `low_value` is passed in rather than recomputed: the caller already has it,
+    # and guarding a None here would be an unsound branch that can silently
+    # converge on a bogus root.
     for _ in range(_BISECT_STEPS):
         middle = (low + high) / 2
         middle_value = evaluate(middle)

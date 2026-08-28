@@ -1067,7 +1067,6 @@ from functools import cmp_to_key
 
 import sympy
 
-
 _MAX_POLY_DEGREE = 10
 
 
