@@ -225,6 +225,9 @@ class VisualSpec:
     data: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        # Flattened, not nested: renderers key off "kind" and read their fields
+        # directly, with no `data` unwrap. Nesting would look tidier and break
+        # every renderer.
         return {"kind": self.kind, **self.data}
 
 
@@ -289,6 +292,7 @@ git commit -m "feat: add Step, Sequence and VisualSpec model"
 
 import pytest
 import sympy
+from sympy.core.function import AppliedUndef
 
 from mathview.core.parse import ParseError, free_parameters, parse_expression
 
@@ -343,9 +347,6 @@ def test_free_parameters_is_empty_for_a_plain_function():
 
 
 def test_unmatched_parentheses_are_parse_errors_not_crashes():
-    # tokenize.TokenError and IndexError are not SyntaxError subclasses, so a
-    # narrow except tuple lets the commonest maths typo of all escape as a raw
-    # traceback - and as a 500 once Task 11 puts an API in front of this.
     for text in ["(1+2", "1+2)", "((n"]:
         with pytest.raises(ParseError):
             parse_expression(text, "n")
@@ -358,6 +359,24 @@ def test_builtins_are_not_reachable_from_parsed_input():
     # __builtins__ as the only thing standing between user text and eval.
     with pytest.raises(ParseError):
         parse_expression('n + __import__("os").getpid()*0', "n")
+
+
+def test_a_declared_function_parses_as_a_call_not_a_product():
+    # Without local_dict the implicit-multiplication transformation reads
+    # g(x) as g*x, so f(g(x)) becomes f*g*x and composition is impossible.
+    known = {"f": sympy.Function("f"), "g": sympy.Function("g")}
+
+    expr = parse_expression("f(g(x))", "x", known)
+
+    assert expr.atoms(AppliedUndef) == {expr, sympy.Function("g")(sympy.Symbol("x"))}
+
+
+def test_calling_an_undefined_function_is_rejected():
+    with pytest.raises(ParseError) as excinfo:
+        parse_expression("f(g(x))", "x", {"f": sympy.Function("f")})
+
+    assert "g" in excinfo.value.message
+    assert excinfo.value.offset == 2
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -380,6 +399,8 @@ silently empty graph reaching the user is a bug.
 
 from __future__ import annotations
 
+import re
+
 import sympy
 from sympy.parsing.sympy_parser import (
     convert_xor,
@@ -400,12 +421,14 @@ TRANSFORMS = standard_transformations + (
 # Stripping __builtins__ removes the route to __import__ and the file and
 # network primitives behind it. Note Python re-inserts the real builtins into
 # any globals dict that lacks the key, so setting it explicitly to {} is
-# required - omitting the key is NOT the same thing. Defence in depth, not a
-# guaranteed sandbox.
+# required - omitting the key is NOT the same thing.
 _SAFE_GLOBALS: dict[str, object] = {
     name: getattr(sympy, name) for name in dir(sympy) if not name.startswith("_")
 }
 _SAFE_GLOBALS["__builtins__"] = {}
+
+# Anything of the form `name(` in user text.
+_CALL = re.compile(r"\b([A-Za-z]\w*)\s*\(")
 
 
 class ParseError(Exception):
@@ -421,17 +444,35 @@ class ParseError(Exception):
         return {"error": self.message, "offset": self.offset, "input": self.text}
 
 
-def parse_expression(text: str, variable: str) -> sympy.Expr:
-    """Parse `text` into a SymPy expression, raising ParseError on failure."""
+def parse_expression(
+    text: str, variable: str, functions: dict[str, object] | None = None
+) -> sympy.Expr:
+    """Parse `text` into a SymPy expression, raising ParseError on failure.
+
+    `functions` names the user-defined functions that may be called. Declaring
+    them matters: with `g` unknown, the implicit-multiplication transformation
+    reads `g(x)` as `g * x`, so `f(g(x))` silently becomes `f*g*x` and
+    composition is impossible. Anything called but neither declared here nor a
+    known SymPy name is rejected rather than quietly turned into a product.
+    """
     stripped = text.strip()
     if not stripped:
         raise ParseError("empty expression", 0, text)
+
+    known = functions or {}
+    for match in _CALL.finditer(stripped):
+        name = match.group(1)
+        if name not in known and name not in _SAFE_GLOBALS:
+            raise ParseError(
+                f"no function named {name} is defined yet", match.start(1), text
+            )
 
     try:
         expr = sympy.parsing.sympy_parser.parse_expr(
             stripped,
             transformations=TRANSFORMS,
             global_dict=_SAFE_GLOBALS,
+            local_dict=dict(known),
             evaluate=True,
         )
     except SyntaxError as exc:
@@ -457,9 +498,6 @@ def parse_expression(text: str, variable: str) -> sympy.Expr:
     if not isinstance(expr, sympy.Expr):
         raise ParseError("that is not an expression", 0, text)
 
-    # `variable` is unused here: parsing is purely syntactic, so which symbol is
-    # bound makes no difference. The parameter stays for symmetry with
-    # free_parameters() and because Tasks 8, 9 and 10 call this with two args.
     return expr
 
 
@@ -475,7 +513,7 @@ def free_parameters(expr: sympy.Expr, variable: str) -> list[str]:
 uv run pytest tests/test_parse.py -v
 ```
 
-Expected: 9 passed
+Expected: 11 passed
 
 - [ ] **Step 5: Commit**
 
@@ -1558,11 +1596,43 @@ def test_expand_resolves_a_composition():
     assert expand(definitions["h"].body, definitions) == 2 * x**2
 
 
-def test_expand_rejects_circular_references():
-    definitions = parse_definitions(["f(x) = g(x)", "g(x) = f(x)"])
+def test_expand_resolves_three_levels():
+    rows = ["f(x) = 2x", "g(x) = x^2", "h(x) = x + 1", "k(x) = f(g(h(x)))"]
+    definitions = parse_definitions(rows)
+    x = sympy.Symbol("x")
 
+    assert expand(definitions["k"].body, definitions) == 2 * (x + 1) ** 2
+
+
+def test_a_forward_reference_is_rejected():
+    # Rows may only call names defined above them, so this cannot silently
+    # become the product h = f * x.
     with pytest.raises(ParseError):
-        expand(definitions["f"].body, definitions)
+        parse_definitions(["h(x) = f(x)", "f(x) = 2x"])
+
+
+def test_a_self_reference_is_rejected():
+    with pytest.raises(ParseError):
+        parse_definitions(["f(x) = f(x)"])
+
+
+def test_sympy_functions_are_still_callable():
+    definitions = parse_definitions(["f(x) = sqrt(x) + log(x)"])
+    x = sympy.Symbol("x")
+
+    assert definitions["f"].body == sympy.sqrt(x) + sympy.log(x)
+
+
+def test_a_parameter_is_not_mistaken_for_a_function():
+    definitions = parse_definitions(["f(x) = a*x^2 + b"])
+    x, a, b = sympy.symbols("x a b")
+
+    assert definitions["f"].body == a * x**2 + b
+
+
+def test_no_rows_is_a_parse_error():
+    with pytest.raises(ParseError):
+        parse_definitions([])
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1595,6 +1665,10 @@ from mathview.core.parse import ParseError, parse_expression
 _LHS = re.compile(r"^\s*([A-Za-z]\w*)\s*\(\s*([A-Za-z]\w*)\s*\)\s*$")
 
 # Bounds substitution so a cycle terminates with an error instead of hanging.
+# parse_definitions only lets a row call names defined on earlier rows, so the
+# reference graph it produces is a DAG and a cycle can't reach this guard that
+# way; it stays as defence for a Definition dict built by hand rather than
+# through parse_definitions.
 _MAX_EXPANSIONS = 16
 
 
@@ -1622,8 +1696,14 @@ def parse_definitions(rows: list[str]) -> dict[str, Definition]:
             raise ParseError("the left side must look like f(x)", 0, row)
 
         name, variable = match.group(1), match.group(2)
+        # Only names defined on EARLIER rows are callable here. That ordering is
+        # what makes a forward reference an error rather than a silent product:
+        # with `g` undeclared, implicit multiplication reads `g(x)` as `g * x`.
+        known = {defined: sympy.Function(defined) for defined in definitions}
         definitions[name] = Definition(
-            name=name, variable=variable, body=parse_expression(right, variable)
+            name=name,
+            variable=variable,
+            body=parse_expression(right, variable, known),
         )
     return definitions
 
@@ -1656,7 +1736,7 @@ def expand(expr: sympy.Expr, definitions: dict[str, Definition]) -> sympy.Expr:
 uv run pytest tests/test_definitions.py -v
 ```
 
-Expected: 5 passed
+Expected: 10 passed
 
 - [ ] **Step 5: Commit**
 
