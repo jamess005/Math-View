@@ -125,14 +125,20 @@ slots in the palette; the UI disables "add" at six). Produces five steps:
 
 1. **The functions as entered** — notation only.
 2. **Evaluated small** — table at n = 1, 5, 10, 20.
-3. **Crossover points** — solved exactly, marked on the plot, with the region
-   before each crossing shaded where the asymptotically worse function is
-   actually faster.
-4. **Dominance chain** — `n ≺ n log n ≺ n² ≺ 2ⁿ`.
+3. **Crossover points** — found numerically (a sign change plus bisection;
+   `sympy.solve` returns Lambert-W forms for exponential-vs-polynomial pairs)
+   and marked on the plot. Candidates that fall on a pole are discarded: a sign
+   change across an asymptote is not a meeting point.
+4. **Dominance chain** — `n ≺ n log n ≺ n² ≺ 2ⁿ`. Same-order functions are
+   joined by `∼`, not `≺`: `n` and `100n` differ only by a constant, so neither
+   ever overtakes the other.
 5. **Big-O classification** — each function with its bound.
 
 Step 3 carries the pedagogical weight: asymptotic order says what wins
-*eventually*, not what wins at a given input size.
+*eventually*, not what wins at a given input size. It states that and no more —
+a blanket claim about which function leads before a crossing is false in
+general, and specifically backwards for `2ⁿ` against `n²`, which is the larger
+curve everywhere before their first crossing at n = 2.
 
 Controls: n-range slider, log-scale toggle.
 
@@ -146,7 +152,10 @@ directly as `h(x) = f(g(x))`. Produces:
   bound variable nor a defined function name. `f(x) = a*x^2 + b` yields `a`, `b`.
 - A **value trace**: pick an `x`, and one step per hop — x-axis → curve →
   y-axis. For a composition the trace expands to one hop per nested call, inner
-  to outer, so `h(4)` steps through `g(4) = 16` then `f(16) = 35`.
+  to outer, so with `f(x) = 2x` and `g(x) = x^2`, `h(4)` steps through
+  `g(4) = 16` then `f(16) = 32`. A hop that has no real value — `sqrt` below
+  zero, `1/x` at zero — stops the trace with a step saying so, rather than
+  raising.
 
 Covers the function types in the Discrete Maths vault: linear, quadratic,
 exponential, logarithmic, floor, ceiling.
@@ -173,7 +182,12 @@ mathview/
 │   │   └── registry.py         topic lookup
 │   └── topics/
 │       ├── growth.py
-│       └── functions.py
+│       ├── functions.py
+│       ├── definitions.py      named rows, reference resolution
+│       ├── tracing.py          walking a value through calls
+│       ├── sampling.py         expression → plottable points
+│       ├── crossover.py        crossing detection and validation
+│       └── asymptotics.py      dominance order, Big-O class
 ├── web/
 │   ├── index.html
 │   ├── css/tokens.css          palette — single source of truth
@@ -203,17 +217,17 @@ identity, bright neon marking the data.
 
 ```
 GROUND                 IDENTITY  (chrome only, never a data series)
-#08080A  page          #FF2740  signal red — active tab, focus ring,
-#121215  panel                               current-step marker
-#1C1C21  input         #8C0F1E  deep red   — pressed states
-#2A2A31  grid
-                       SERIES  (neon — data only)
-TEXT                   slot 1  #00D4FF  cyan     O(1)
-#F4F4F6  primary       slot 2  #00E88A  green    O(log n)
-#9A9AA6  secondary     slot 3  #FFD426  yellow   O(n)
-#6A6A76  muted         slot 4  #FF8A1F  orange   O(n log n)
-                       slot 5  #FF3DCE  magenta  O(n²)
-                       slot 6  #9D5CFF  violet   O(2ⁿ)
+#08080a  page          #ff2740  signal red — active tab, focus ring,
+#121215  panel                              current-step marker   5.0:1
+#1c1c21  input         #8c0f1e  deep red   — pressed states
+#2a2a31  grid
+                       SERIES  (neon — data only, cool to hot)
+TEXT                   slot 1  #2cdcff  cyan     O(1)
+#f4f4f6  primary 17.0  slot 2  #00c571  green    O(log n)
+#9a9aa6  second   6.7  slot 3  #ffdf1f  yellow   O(n)
+#6a6a76  muted    3.5  slot 4  #ff8734  orange   O(n log n)
+                       slot 5  #ff4a9a  pink     O(n²)
+                       slot 6  #b4a9ff  violet   O(2ⁿ)
 ```
 
 **Rules:**
@@ -229,12 +243,14 @@ TEXT                   slot 1  #00D4FF  cyan     O(1)
 - All values live in `web/css/tokens.css` as custom properties. No hex literal
   appears anywhere else in the codebase.
 
-Values are validated with the dataviz palette checker (lightness band, chroma
-floor, colour-vision-deficiency separation, 3:1 contrast against panel) before
-being locked. Any value failing validation is adjusted, and this document
-updated to match.
-
----
+**Validation outcome.** Measured with the dataviz palette checker against the
+panel: colour-blind separation ΔE 14.4 (target 8), normal-vision ΔE 19.2, all
+six series above 3:1 contrast. It deliberately fails the checker's dark-mode
+lightness band (L 0.48–0.67). That band guards against colours washing out
+toward white on a dark ground; the measured separation numbers show that is not
+happening here. The band-compliant alternative was muted — teal, olive, brown —
+and traded the band pass for two series below 3:1 contrast, which is a real
+readability cost and not the look this app is for.
 
 ## 7. Testing
 

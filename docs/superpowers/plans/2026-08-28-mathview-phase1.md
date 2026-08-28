@@ -2345,14 +2345,18 @@ git commit -m "feat: add HTTP API for sequences and topics"
 - Create: `web/css/app.css`
 - Modify: `web/index.html` (replace the placeholder from Task 11)
 
-- [ ] **Step 1: Validate the palette before writing it down**
+- [x] **Step 1: Validate the palette — DONE, values below are the result**
 
-Load the `dataviz` skill and run its palette checker over the six series
-colours below against panel `#121215`. Check lightness band, chroma floor,
-colour-vision-deficiency separation of adjacent pairs, and 3:1 contrast against
-the panel. **Adjust any failing value, and update both this plan and
-`docs/superpowers/specs/2026-08-28-mathview-design.md` §6 to match what you
-ship.** Do not skip this step — the spec commits to it.
+Already run. The original proposal failed: five of six series sat outside the
+dark-mode lightness band, and violet/magenta were only dE 7.4 apart under
+protanopia (3.0 tritan) — effectively one colour to a colour-blind reader.
+
+A search over 4000 candidates produced the values below: CVD dE 14.4,
+normal-vision dE 19.2, all six above 3:1 contrast. The one remaining failure is
+the lightness band, accepted deliberately and explained in the file's own
+comment. The fully band-compliant alternative was muted (teal, olive, brown) and
+traded the band pass for two series below 3:1 contrast; the user chose neon with
+that trade-off stated.
 
 - [ ] **Step 2: Write `web/css/tokens.css`**
 
@@ -2363,7 +2367,15 @@ ship.** Do not skip this step — the spec commits to it.
    Matte black and dark grey ground; red is chrome only and never a data
    series, so "important" and "selected" can never be confused; neon is
    reserved for data. Series run cool to hot as growth worsens, which makes the
-   palette itself carry meaning in the growth topic. */
+   palette itself carry meaning in the growth topic.
+
+   Validated with the dataviz palette checker against the panel (#121215):
+   colour-blind separation dE 14.4 (target 8), normal-vision dE 19.2, and all
+   six series above 3:1 contrast. It deliberately fails the checker's dark-mode
+   lightness band (L 0.48-0.67): that band guards against colours washing out
+   toward white on a dark ground, and the measured separation numbers show that
+   is not happening here. The alternative that passed the band traded it for two
+   series below 3:1 contrast - harder to read, and not the look this app wants. */
 
 :root {
   /* Ground */
@@ -2374,22 +2386,22 @@ ship.** Do not skip this step — the spec commits to it.
   --border: rgba(255, 255, 255, 0.07);
 
   /* Text */
-  --ink: #f4f4f6;
-  --ink-2: #9a9aa6;
-  --ink-muted: #6a6a76;
+  --ink: #f4f4f6;      /* 17.0:1 on panel */
+  --ink-2: #9a9aa6;    /*  6.7:1 */
+  --ink-muted: #6a6a76;/*  3.5:1 */
 
-  /* Identity - chrome only */
-  --red: #ff2740;
+  /* Identity - chrome only, never a data series */
+  --red: #ff2740;      /*  5.0:1 */
   --red-deep: #8c0f1e;
   --red-glow: rgba(255, 39, 64, 0.45);
 
-  /* Series - data only */
-  --s0: #00d4ff;
-  --s1: #00e88a;
-  --s2: #ffd426;
-  --s3: #ff8a1f;
-  --s4: #ff3dce;
-  --s5: #9d5cff;
+  /* Series - data only, cool to hot as growth worsens */
+  --s0: #2cdcff;  /* cyan    O(1)      */
+  --s1: #00c571;  /* green   O(log n)  */
+  --s2: #ffdf1f;  /* yellow  O(n)      */
+  --s3: #ff8734;  /* orange  O(n log n)*/
+  --s4: #ff4a9a;  /* pink    O(n^2)    */
+  --s5: #b4a9ff;  /* violet  O(2^n)    */
 
   --glow: 10px;
   --radius: 10px;
