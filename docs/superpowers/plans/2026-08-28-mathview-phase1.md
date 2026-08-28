@@ -340,6 +340,24 @@ def test_free_parameters_is_empty_for_a_plain_function():
     expr = parse_expression("x^2", "x")
 
     assert free_parameters(expr, "x") == []
+
+
+def test_unmatched_parentheses_are_parse_errors_not_crashes():
+    # tokenize.TokenError and IndexError are not SyntaxError subclasses, so a
+    # narrow except tuple lets the commonest maths typo of all escape as a raw
+    # traceback - and as a 500 once Task 11 puts an API in front of this.
+    for text in ["(1+2", "1+2)", "((n"]:
+        with pytest.raises(ParseError):
+            parse_expression(text, "n")
+
+
+def test_builtins_are_not_reachable_from_parsed_input():
+    # The bare call returns an int, which the isinstance guard would reject for
+    # reasons unrelated to security - so it proves nothing. Wrapping it to
+    # return a clean Symbol gets it past that guard, leaving the stripped
+    # __builtins__ as the only thing standing between user text and eval.
+    with pytest.raises(ParseError):
+        parse_expression('n + __import__("os").getpid()*0', "n")
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -376,6 +394,19 @@ TRANSFORMS = standard_transformations + (
     convert_xor,
 )
 
+# parse_expr() calls eval(), so the namespace it evaluates against is the
+# security boundary. Sympy's own docs warn against running it on unsanitised
+# input, and this module is exactly that - the front door for user-typed text.
+# Stripping __builtins__ removes the route to __import__ and the file and
+# network primitives behind it. Note Python re-inserts the real builtins into
+# any globals dict that lacks the key, so setting it explicitly to {} is
+# required - omitting the key is NOT the same thing. Defence in depth, not a
+# guaranteed sandbox.
+_SAFE_GLOBALS: dict[str, object] = {
+    name: getattr(sympy, name) for name in dir(sympy) if not name.startswith("_")
+}
+_SAFE_GLOBALS["__builtins__"] = {}
+
 
 class ParseError(Exception):
     """A parse failure the UI can render against the input box."""
@@ -398,7 +429,10 @@ def parse_expression(text: str, variable: str) -> sympy.Expr:
 
     try:
         expr = sympy.parsing.sympy_parser.parse_expr(
-            stripped, transformations=TRANSFORMS, evaluate=True
+            stripped,
+            transformations=TRANSFORMS,
+            global_dict=_SAFE_GLOBALS,
+            evaluate=True,
         )
     except SyntaxError as exc:
         # The transformations rewrite the source before Python compiles it, so
@@ -409,14 +443,23 @@ def parse_expression(text: str, variable: str) -> sympy.Expr:
         # character. Good enough to orient the user, and never out of bounds.
         raw = (exc.offset or 1) - 1
         offset = max(0, min(raw, max(len(text) - 1, 0)))
-        raise ParseError(f"unexpected syntax near here: {exc.msg}", offset, text) from exc
-    except (TypeError, ValueError, AttributeError, RecursionError) as exc:
+        raise ParseError(
+            f"unexpected syntax near here: {exc.msg}", offset, text
+        ) from exc
+    except Exception as exc:
+        # parse_expr is an eval-based third-party parser and its failure
+        # vocabulary is not a stable contract: unmatched parentheses alone
+        # raise tokenize.TokenError and IndexError, neither a SyntaxError
+        # subclass. Enumerating types means the next unlisted one reaches the
+        # user as a stack trace, so catch broadly and convert.
         raise ParseError(str(exc) or "could not parse expression", 0, text) from exc
 
     if not isinstance(expr, sympy.Expr):
         raise ParseError("that is not an expression", 0, text)
 
-    _ = sympy.Symbol(variable)  # validates the variable name is usable
+    # `variable` is unused here: parsing is purely syntactic, so which symbol is
+    # bound makes no difference. The parameter stays for symmetry with
+    # free_parameters() and because Tasks 8, 9 and 10 call this with two args.
     return expr
 
 
@@ -432,7 +475,7 @@ def free_parameters(expr: sympy.Expr, variable: str) -> list[str]:
 uv run pytest tests/test_parse.py -v
 ```
 
-Expected: 7 passed
+Expected: 9 passed
 
 - [ ] **Step 5: Commit**
 
@@ -2815,7 +2858,19 @@ that signature in Tasks 8 and 10.
 | `2ⁿ` vs `n²` crossings on `[1, 20]` | `[2.0, 4.0]` — **two**, not one |
 | `n^^2` SyntaxError offset | 16, for a 4-character input — clamp required |
 
-The last two corrected the plan. An earlier draft of Task 6 asserted a single
+**Corrections made during execution** (found by the review pipeline, verified
+independently before acting, and folded back into Task 3 above):
+
+| Found | Reality | Fix |
+| --- | --- | --- |
+| `(1+2`, `1+2)`, `((n` | escape as `tokenize.TokenError` / `IndexError` — neither a `SyntaxError` subclass | broadened to `except Exception` |
+| `n + __import__("os").getpid()*0` | `os.getpid()` **executed**, returned a clean `Symbol`, sailed past the `isinstance` guard | `global_dict=_SAFE_GLOBALS` with `__builtins__` stripped |
+| the first draft of the builtins test | `__import__("os").getpid()` returns an `int`, so the `isinstance` guard rejected it for an unrelated reason — the test passed with *and* without the fix | rewritten to use the Symbol-returning form, which only `_SAFE_GLOBALS` catches |
+
+The unmatched-parenthesis case is the one that mattered most: it is the commonest
+maths typo there is, and it contradicted this spec's own error-handling promise.
+
+The last two rows of the verification table corrected the plan before execution. An earlier draft of Task 6 asserted a single
 `2ⁿ`/`n²` crossing between 4 and 5; that is wrong, and the test now asserts
 `[2.0, 4.0]`. Task 3's offset clamp is load-bearing rather than defensive.
 
