@@ -754,7 +754,7 @@ Lambert-W forms for the mixed cases that matter most here (`2**n` against
 
 import sympy
 
-from mathview.topics.crossover import find_crossovers
+from mathview.topics.crossover import find_crossovers, meeting_point
 
 
 def test_quadratic_overtakes_linear_at_the_known_point():
@@ -803,6 +803,20 @@ def test_a_crossing_exactly_at_stop_is_reported():
     n = sympy.Symbol("n")
 
     assert find_crossovers(n, sympy.Integer(15), "n", 5.0, 15.0) == [15.0]
+
+
+def test_meeting_point_rejects_a_pole():
+    # find_crossovers reports the sign change across 1/(n-1)'s asymptote; the
+    # curves are nowhere near each other there, so it is not a meeting point.
+    n = sympy.Symbol("n")
+
+    assert meeting_point(1 / (n - 1), sympy.Integer(1), "n", 1.0) is None
+
+
+def test_meeting_point_returns_the_shared_y_where_curves_really_meet():
+    n = sympy.Symbol("n")
+
+    assert meeting_point(n**2, 100 * n, "n", 100.0) == 10000.0
 ```
 
 This is exactly the confusion the crossover step exists to clear up: "exponential
@@ -869,6 +883,34 @@ def _bisect(evaluate, low: float, low_value: float, high: float) -> float:
     return (low + high) / 2
 
 
+def meeting_point(
+    expr_a: sympy.Expr,
+    expr_b: sympy.Expr,
+    variable: str,
+    x: float,
+) -> float | None:
+    """The shared y where two curves meet, or None if they do not really meet.
+
+    find_crossovers reports a sign change in (a - b), and that also occurs
+    across a pole, where the curves are nowhere near each other: bisection
+    lands on the asymptote and subs() returns complex infinity. 1/(n-1)
+    against a constant crashed on exactly this. Both sides must be finite AND
+    equal there for the candidate to count as a crossing.
+    """
+    symbol = sympy.Symbol(variable)
+    try:
+        y_a = float(expr_a.subs(symbol, x))
+        y_b = float(expr_b.subs(symbol, x))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not (math.isfinite(y_a) and math.isfinite(y_b)):
+        return None
+    scale = max(1.0, abs(y_a), abs(y_b))
+    if abs(y_a - y_b) > 1e-6 * scale:
+        return None
+    return y_a
+
+
 def find_crossovers(
     expr_a: sympy.Expr,
     expr_b: sympy.Expr,
@@ -913,7 +955,7 @@ def find_crossovers(
 uv run pytest tests/test_crossover.py -v
 ```
 
-Expected: 6 passed
+Expected: 8 passed
 
 - [ ] **Step 5: Commit**
 
@@ -1072,28 +1114,39 @@ def classify(expr: sympy.Expr, variable: str) -> str:
     return "greater than n!"
 
 
+def compare_growth(expr_a: sympy.Expr, expr_b: sympy.Expr, variable: str) -> int:
+    """-1 if `expr_a` grows strictly slower, 1 if strictly faster, 0 if same order.
+
+    Same order covers a finite non-zero ratio limit - n and 100n differ only by a
+    constant, so neither ever overtakes the other. Callers that render an
+    ordering need that distinction: writing `n < 100n` would be false.
+    """
+    return _compare(expr_a, expr_b, sympy.Symbol(variable))
+
+
+def _compare(expr_a: sympy.Expr, expr_b: sympy.Expr, symbol: sympy.Symbol) -> int:
+    limit = _ratio_limit(expr_a, expr_b, symbol)
+    if limit is None:
+        # Known limitation: treating "SymPy could not decide" as "same order"
+        # makes the comparator non-transitive, so the result can depend on the
+        # order the caller listed the functions in. Every standard complexity
+        # class resolves symbolically, so this cannot fire for the inputs this
+        # topic is for; a numeric fallback was prototyped and rejected because
+        # it could not reliably separate O(1) from O(log n) without probing
+        # absurdly far out.
+        return 0
+    if limit.is_zero:
+        return -1
+    if limit.is_infinite:
+        return 1
+    # Finite non-zero: the same order, differing only by a constant factor.
+    return 0
+
+
 def dominance_order(exprs: list[sympy.Expr], variable: str) -> list[sympy.Expr]:
     """Sort `exprs` slowest-growing first."""
     symbol = sympy.Symbol(variable)
-
-    def compare(expr_a: sympy.Expr, expr_b: sympy.Expr) -> int:
-        limit = _ratio_limit(expr_a, expr_b, symbol)
-        if limit is None:
-            # Known limitation: treating "SymPy could not decide" as "same
-            # order" makes the comparator non-transitive, so the result can
-            # depend on the order the caller listed the functions in. Every
-            # standard complexity class resolves symbolically, so this cannot
-            # fire for the inputs this topic is for; a numeric fallback was
-            # prototyped and rejected because it could not reliably separate
-            # O(1) from O(log n) without probing absurdly far out.
-            return 0
-        if limit.is_zero:
-            return -1
-        if limit.is_infinite:
-            return 1
-        return 0
-
-    return sorted(exprs, key=cmp_to_key(compare))
+    return sorted(exprs, key=cmp_to_key(lambda a, b: _compare(a, b, symbol)))
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -1193,6 +1246,46 @@ def test_identical_functions_produce_no_crossover_markers():
     assert sequence.steps[2].visual.data["markers"] == []
 
 
+def test_a_pole_does_not_crash_and_is_not_a_crossing():
+    # A sign change across a pole is not a meeting point. Before the fix this
+    # raised TypeError: Cannot convert complex to float.
+    sequence = build(["1/(n-1)", "1"], {"n_max": 10})
+    markers = sequence.steps[2].visual.data["markers"]
+
+    # The genuine crossing at n = 2 survives; the pole at n = 1 does not.
+    assert len(markers) == 1
+    assert abs(markers[0]["x"] - 2.0) < 1e-6
+
+
+def test_curves_separated_by_a_pole_are_not_reported_as_crossing():
+    sequence = build(["1/n", "1/(n-5)"], {"n_max": 20})
+
+    assert sequence.steps[2].visual.data["markers"] == []
+    assert "do not cross" in sequence.steps[2].prose
+
+
+def test_crossover_prose_does_not_claim_which_function_is_faster():
+    # 2^n is the asymptotically worse function but is the LARGER one before
+    # their first crossing at n = 2, so any blanket claim is backwards here.
+    sequence = build(["2^n", "n^2"], {"n_max": 20})
+
+    assert "worse function is the faster" not in sequence.steps[2].prose
+    assert "eventually begins" in sequence.steps[2].prose
+
+
+def test_same_order_functions_are_not_a_strict_chain():
+    # n and 100n differ only by a constant, so neither overtakes the other.
+    sequence = build(["n", "100*n"], {})
+
+    assert sequence.steps[3].notation == r"n \sim 100 n"
+
+
+def test_non_positive_range_is_a_parse_error():
+    for bad in (0, -50):
+        with pytest.raises(ParseError):
+            build(["n", "n^2"], {"n_max": bad})
+
+
 def test_no_rows_is_a_parse_error():
     with pytest.raises(ParseError):
         build([], {})
@@ -1223,13 +1316,15 @@ the crossover is where that distinction becomes visible.
 
 from __future__ import annotations
 
+import math
+
 import sympy
 
 from mathview.core.parse import ParseError, parse_expression
 from mathview.core.registry import register_topic
 from mathview.core.step import Sequence, Step, VisualSpec
-from mathview.topics.asymptotics import classify, dominance_order
-from mathview.topics.crossover import find_crossovers
+from mathview.topics.asymptotics import classify, compare_growth, dominance_order
+from mathview.topics.crossover import find_crossovers, meeting_point
 from mathview.topics.sampling import sample_curve
 
 VARIABLE = "n"
@@ -1314,16 +1409,22 @@ def _step_crossovers(parsed, n_max) -> Step:
             _, expr_a = parsed[i]
             _, expr_b = parsed[j]
             for x in find_crossovers(expr_a, expr_b, VARIABLE, 0.5, n_max):
-                y = expr_a.subs(sympy.Symbol(VARIABLE), x)
-                markers.append({"kind": "crossover", "x": float(x), "y": float(y)})
+                y = meeting_point(expr_a, expr_b, VARIABLE, x)
+                if y is None:
+                    continue
+                markers.append({"kind": "crossover", "x": float(x), "y": y})
                 sentences.append(
                     f"{sympy.latex(expr_a)} and {sympy.latex(expr_b)} cross at "
                     f"n = {x:g}."
                 )
 
+    # The old wording claimed the asymptotically worse function is faster
+    # before a crossing. That is backwards for 2^n against n^2, which is larger
+    # than n^2 everywhere before their first crossing at n = 2.
     prose = (
         " ".join(sentences)
-        + " Before a crossing, the asymptotically worse function is the faster one."
+        + " Asymptotic order says which function wins eventually;"
+        + " a crossing is where eventually begins."
         if sentences
         else "These functions do not cross in this range."
     )
@@ -1338,12 +1439,20 @@ def _step_crossovers(parsed, n_max) -> Step:
 
 def _step_dominance(parsed, n_max) -> Step:
     ordered = dominance_order([expr for _, expr in parsed], VARIABLE)
-    chain = r" \prec ".join(sympy.latex(expr) for expr in ordered)
+    parts = [sympy.latex(ordered[0])]
+    for earlier, later in zip(ordered, ordered[1:], strict=False):
+        # `n \prec 100n` would be false - they differ only by a constant, so
+        # neither ever overtakes the other. Same-order pairs get \sim.
+        strict = compare_growth(earlier, later, VARIABLE) < 0
+        parts.append((r" \prec " if strict else r" \sim ") + sympy.latex(later))
     return Step(
         index=3,
         title="Dominance chain",
-        notation=chain,
-        prose="Slowest-growing first. Each is eventually overtaken by the next.",
+        notation="".join(parts),
+        prose=(
+            "Slowest-growing first. ≺ means eventually overtaken; "
+            "∼ means the same order, differing only by a constant factor."
+        ),
         visual=_plot(parsed, n_max),
     )
 
@@ -1367,6 +1476,10 @@ def build(rows: list[str], params: dict[str, float]) -> Sequence:
     """Build the five-step growth comparison sequence."""
     parsed = _parse_rows(rows)
     n_max = float(params.get("n_max", 50))
+    if not math.isfinite(n_max) or n_max <= 0:
+        # n is an input size. A zero or negative range produced a degenerate
+        # plot and reported the bisection tolerance (1e-09) as a real crossing.
+        raise ParseError("the range of n must be greater than zero", 0, "")
 
     return Sequence(
         topic="growth",
@@ -1389,7 +1502,7 @@ register_topic("growth", build)
 uv run pytest tests/test_growth.py -v
 ```
 
-Expected: 9 passed
+Expected: 14 passed
 
 - [ ] **Step 5: Commit**
 
