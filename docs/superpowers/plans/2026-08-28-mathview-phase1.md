@@ -975,6 +975,30 @@ def test_dominance_order_sorts_slowest_growing_first():
     ordered = dominance_order(exprs, "n")
 
     assert ordered == [sympy.log(n), n, n**2, 2**n]
+
+
+def test_classify_quartic_does_not_report_exponential():
+    # With a ladder that jumps n^3 -> 2^n, classify() returns the first rung
+    # with a finite ratio limit, which for n^4 is 2^n: true, but it tells a
+    # student a quartic algorithm is exponential-class.
+    n = sympy.Symbol("n")
+
+    assert classify(n**4, "n") == "n^4"
+
+
+def test_classify_high_degree_polynomial():
+    n = sympy.Symbol("n")
+
+    assert classify(n**10, "n") == "n^10"
+
+
+def test_classify_falls_back_to_a_looser_rung_off_ladder():
+    # No fractional rung exists, so n^2.5 is honestly reported as bounded by
+    # n^3. Loose but true - unlike the n^4 case, there is no tighter standard
+    # class to offer.
+    n = sympy.Symbol("n")
+
+    assert classify(n**2.5, "n") == "n^3"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1002,15 +1026,28 @@ from functools import cmp_to_key
 import sympy
 
 
+_MAX_POLY_DEGREE = 10
+
+
 def _ladder(symbol: sympy.Symbol) -> list[tuple[sympy.Expr, str]]:
-    """Standard complexity classes, slowest-growing first."""
+    """Standard complexity classes, slowest-growing first.
+
+    The polynomial rungs run one degree at a time up to _MAX_POLY_DEGREE rather
+    than jumping n^3 -> 2^n. classify() returns the FIRST rung with a finite
+    ratio limit, so a gap there is not merely imprecise: with no n^4 rung,
+    n^4 skips n^3 (ratio -> oo) and lands on 2^n, telling a student that a
+    quartic algorithm is exponential-class. True, and badly misleading.
+    """
+    polynomials = [
+        (symbol**power, "n" if power == 1 else f"n^{power}")
+        for power in range(1, _MAX_POLY_DEGREE + 1)
+    ]
     return [
         (sympy.Integer(1), "1"),
         (sympy.log(symbol), "log n"),
-        (symbol, "n"),
+        polynomials[0],
         (symbol * sympy.log(symbol), "n log n"),
-        (symbol**2, "n^2"),
-        (symbol**3, "n^3"),
+        *polynomials[1:],
         (sympy.Integer(2) ** symbol, "2^n"),
         (sympy.factorial(symbol), "n!"),
     ]
@@ -1042,6 +1079,13 @@ def dominance_order(exprs: list[sympy.Expr], variable: str) -> list[sympy.Expr]:
     def compare(expr_a: sympy.Expr, expr_b: sympy.Expr) -> int:
         limit = _ratio_limit(expr_a, expr_b, symbol)
         if limit is None:
+            # Known limitation: treating "SymPy could not decide" as "same
+            # order" makes the comparator non-transitive, so the result can
+            # depend on the order the caller listed the functions in. Every
+            # standard complexity class resolves symbolically, so this cannot
+            # fire for the inputs this topic is for; a numeric fallback was
+            # prototyped and rejected because it could not reliably separate
+            # O(1) from O(log n) without probing absurdly far out.
             return 0
         if limit.is_zero:
             return -1
@@ -1058,7 +1102,7 @@ def dominance_order(exprs: list[sympy.Expr], variable: str) -> list[sympy.Expr]:
 uv run pytest tests/test_asymptotics.py -v
 ```
 
-Expected: 6 passed
+Expected: 9 passed
 
 - [ ] **Step 5: Commit**
 
