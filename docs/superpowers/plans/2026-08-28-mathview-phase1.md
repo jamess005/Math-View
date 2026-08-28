@@ -25,6 +25,7 @@
 | `src/mathview/core/registry.py` | topic name → generator lookup |
 | `src/mathview/topics/growth.py` | asymptotic comparison, 5 steps |
 | `src/mathview/topics/functions.py` | named definitions, params, value trace |
+| `src/mathview/topics/tracing.py` | walking a value through nested calls |
 | `web/css/tokens.css` | palette — single source of truth |
 | `web/css/app.css` | layout and chrome |
 | `web/index.html` | shell markup |
@@ -1889,6 +1890,56 @@ def test_an_undefined_hop_stops_a_composition_early():
 def test_no_rows_is_a_parse_error():
     with pytest.raises(ParseError):
         build([], {"x": 1})
+
+
+def test_a_bound_variable_other_than_x_is_not_baked_into_the_curve():
+    # parse_definitions accepts any identifier. Substituting the literal "x"
+    # instead of the row's own variable plotted f(t) = a*t as a flat line at 15.
+    sequence = build(["f(t) = a*t"], {"x": 3, "a": 5})
+    points = sequence.steps[0].visual.data["curves"][0]["points"]
+
+    assert points[0][1] == -50.0
+    assert points[-1][1] == 50.0
+    assert sequence.steps[-1].title == "f(3) = 15"
+
+
+def test_the_bound_variable_is_not_offered_as_a_slider():
+    sequence = build(["f(t) = a*t"], {"x": 3, "a": 5})
+
+    assert sequence.steps[0].visual.data["parameters"] == ["a"]
+
+
+def test_a_composition_across_different_variable_names():
+    rows = ["f(t) = 2t", "g(u) = u^2", "h(v) = f(g(v))"]
+
+    sequence = build(rows, {"x": 4})
+
+    assert _titles(sequence)[2:] == ["g(4) = 16", "f(16) = 32"]
+
+
+def test_overflow_is_worded_differently_from_undefined():
+    # 2^1024 exists and merely exceeds float64, so "check the domain" of 2^x
+    # would be false advice.
+    rows = ["f(x) = 2^x", "g(x) = 2^x", "h(x) = g(f(x))"]
+
+    sequence = build(rows, {"x": 10})
+
+    assert sequence.steps[-1].title == "g(1024) is too large to show"
+
+
+def test_a_non_numeric_parameter_is_a_parse_error():
+    with pytest.raises(ParseError):
+        build(["f(x) = x + 1"], {"x": "banana"})
+
+
+def test_later_hops_narrate_the_move_back_to_the_x_axis():
+    rows = ["f(x) = 2x", "g(x) = x^2", "h(x) = f(g(x))"]
+
+    sequence = build(rows, {"x": 4})
+
+    assert "starts on the x-axis" in sequence.steps[1].prose
+    assert "Up from the x-axis" in sequence.steps[2].prose
+    assert "becomes the next input" in sequence.steps[3].prose
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1910,56 +1961,42 @@ existing rows switches the trace to the composition without any extra control.
 
 from __future__ import annotations
 
-import math
-
 import sympy
-from sympy.core.function import AppliedUndef
 
 from mathview.core.parse import ParseError, free_parameters
 from mathview.core.registry import register_topic
 from mathview.core.step import Sequence, Step, VisualSpec
 from mathview.topics.definitions import Definition, expand, parse_definitions
 from mathview.topics.sampling import sample_curve
+from mathview.topics.tracing import call_chain, real_value
 
 X_RANGE = (-10.0, 10.0)
 
 
-def _substitute_parameters(expr: sympy.Expr, params: dict[str, float]) -> sympy.Expr:
+def _substitute_parameters(
+    expr: sympy.Expr, variable: str, params: dict[str, float]
+) -> sympy.Expr:
+    """Bake slider values into `expr`, leaving the row's own variable free.
+
+    It must be the row's variable, not the literal "x": parse_definitions
+    accepts any identifier, so `f(t) = a*t` with the slider at t=3 baked t in
+    too and plotted a flat line at 15 instead of a line through the origin.
+    """
     for name, value in params.items():
-        if name != "x":
+        if name != variable:
             expr = expr.subs(sympy.Symbol(name), sympy.Float(value))
     return expr
 
 
-def _real_value(expr: sympy.Expr) -> float | None:
-    """`expr` as a real number, or None where it has none.
-
-    Tracing a value through a function lands on undefined points constantly:
-    the x slider runs -10 to 10, so sqrt(x) below zero and 1/x at zero are
-    reached by ordinary dragging. subs() returns a complex number or zoo there
-    and float() raises, so every one of those was a crash.
-    """
-    try:
-        number = complex(expr)
-    except (TypeError, ValueError, OverflowError):
-        return None
-    if abs(number.imag) > 1e-12 or not math.isfinite(number.real):
-        return None
-    return number.real
-
-
-def _call_chain(body: sympy.Expr, definitions: dict[str, Definition]) -> list[str]:
-    """Names in a nested call like f(g(x)), innermost first."""
-    chain: list[str] = []
-    node = body
-    while (
-        isinstance(node, AppliedUndef)
-        and node.func.__name__ in definitions
-        and len(node.args) == 1
-    ):
-        chain.append(node.func.__name__)
-        node = node.args[0]
-    return list(reversed(chain))
+def _numeric_params(params: dict[str, float]) -> dict[str, float]:
+    """Coerce slider values to floats, as a ParseError rather than a traceback."""
+    numeric: dict[str, float] = {}
+    for name, value in params.items():
+        try:
+            numeric[name] = float(value)
+        except (TypeError, ValueError):
+            raise ParseError(f"{name} must be a number", 0, str(value)) from None
+    return numeric
 
 
 def _plot(
@@ -1969,7 +2006,7 @@ def _plot(
     parameter_names: set[str] = set()
     for slot, definition in enumerate(definitions.values()):
         resolved = _substitute_parameters(
-            expand(definition.body, definitions), params
+            expand(definition.body, definitions), definition.variable, params
         )
         parameter_names.update(free_parameters(definition.body, definition.variable))
         curves.append(
@@ -2001,12 +2038,11 @@ def _plot(
 def build(rows: list[str], params: dict[str, float]) -> Sequence:
     """Plot each definition, then trace `x` through the last one."""
     definitions = parse_definitions(rows)
-    x_value = float(params.get("x", 0))
+    params = _numeric_params(params)
+    x_value = params.get("x", 0.0)
 
     traced = list(definitions.values())[-1]
-    chain = _call_chain(traced.body, definitions) or [traced.name]
-    if chain == [traced.name] and traced.name not in definitions:
-        raise ParseError("nothing to trace", 0, rows[-1])
+    chain = call_chain(traced.body, definitions) or [traced.name]
 
     steps = [
         Step(
@@ -2034,19 +2070,20 @@ def build(rows: list[str], params: dict[str, float]) -> Sequence:
     for hop, name in enumerate(chain, start=2):
         definition = definitions[name]
         body = _substitute_parameters(
-            expand(definition.body, definitions), params
+            expand(definition.body, definitions), definition.variable, params
         )
         previous = value
-        result = _real_value(body.subs(sympy.Symbol(definition.variable), previous))
+        result, reason = real_value(
+            body.subs(sympy.Symbol(definition.variable), previous)
+        )
         if result is None:
             steps.append(
                 Step(
                     index=hop,
-                    title=f"{name}({previous:g}) is undefined",
+                    title=f"{name}({previous:g}) {reason}",
                     notation=rf"{name}({previous:g}) \notin \mathbb{{R}}",
                     prose=(
-                        f"{name} has no real value at {previous:g}, so the trace "
-                        f"stops here. Move x, or check the domain."
+                        f"{name}({previous:g}) {reason}, so the trace stops here."
                     ),
                     visual=_plot(definitions, params, markers=[]),
                 )
@@ -2058,7 +2095,13 @@ def build(rows: list[str], params: dict[str, float]) -> Sequence:
                 index=hop,
                 title=f"{name}({previous:g}) = {value:g}",
                 notation=rf"{name}({previous:g}) = {value:g}",
-                prose=f"Up to the curve of {name}, then across to the y-axis.",
+                prose=(
+                    f"Up from the x-axis to the curve of {name}, then across to "
+                    f"the y-axis."
+                    if hop == 2
+                    else f"That result becomes the next input: across to the "
+                    f"x-axis, up to the curve of {name}, then back to the y-axis."
+                ),
                 visual=_plot(
                     definitions,
                     params,
@@ -2081,7 +2124,7 @@ register_topic("functions", build)
 uv run pytest tests/test_functions.py -v
 ```
 
-Expected: 9 passed
+Expected: 15 passed
 
 - [ ] **Step 5: Commit**
 
