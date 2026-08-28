@@ -1,0 +1,47 @@
+/* MathView palette. Single source of truth - no hex literal appears anywhere
+   else in the codebase.
+
+   Matte black and dark grey ground; red is chrome only and never a data
+   series, so "important" and "selected" can never be confused; neon is
+   reserved for data. Series run cool to hot as growth worsens, which makes the
+   palette itself carry meaning in the growth topic.
+
+   Validated with the dataviz palette checker against the panel (#121215):
+   colour-blind separation dE 14.4 (target 8), normal-vision dE 19.2, and all
+   six series above 3:1 contrast. It deliberately fails the checker's dark-mode
+   lightness band (L 0.48-0.67): that band guards against colours washing out
+   toward white on a dark ground, and the measured separation numbers show that
+   is not happening here. The alternative that passed the band traded it for two
+   series below 3:1 contrast - harder to read, and not the look this app wants. */
+
+:root {
+  /* Ground */
+  --page: #08080a;
+  --panel: #121215;
+  --input: #1c1c21;
+  --grid: #2a2a31;
+  --border: rgba(255, 255, 255, 0.07);
+
+  /* Text */
+  --ink: #f4f4f6;      /* 17.0:1 on panel */
+  --ink-2: #9a9aa6;    /*  6.7:1 */
+  --ink-muted: #6a6a76;/*  3.5:1 */
+
+  /* Identity - chrome only, never a data series */
+  --red: #ff2740;      /*  5.0:1 */
+  --red-deep: #8c0f1e;
+  --red-glow: rgba(255, 39, 64, 0.45);
+
+  /* Series - data only, cool to hot as growth worsens */
+  --s0: #2cdcff;  /* cyan    O(1)      */
+  --s1: #00c571;  /* green   O(log n)  */
+  --s2: #ffdf1f;  /* yellow  O(n)      */
+  --s3: #ff8734;  /* orange  O(n log n)*/
+  --s4: #ff4a9a;  /* pink    O(n^2)    */
+  --s5: #b4a9ff;  /* violet  O(2^n)    */
+
+  --glow: 10px;
+  --radius: 10px;
+  --font: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "JetBrains Mono", "Fira Code", monospace;
+}

@@ -1,1 +1,41 @@
-<!doctype html><title>MathView</title>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>MathView</title>
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer
+          src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>MathView</h1>
+    <select id="topic">
+      <option value="growth">Growth</option>
+      <option value="functions">Functions</option>
+    </select>
+    <div class="views">
+      <button data-view="notation">Notation</button>
+      <button data-view="visual">Visual</button>
+      <button data-view="both" class="active">Both</button>
+    </div>
+  </header>
+
+  <main id="main">
+    <div id="rail">
+      <div id="rows"></div>
+      <button id="add">+ add</button>
+      <div id="params"></div>
+      <div id="error" class="error"></div>
+    </div>
+    <div id="canvas-wrap"><canvas id="canvas"></canvas></div>
+  </main>
+
+  <section id="steps"></section>
+
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>
