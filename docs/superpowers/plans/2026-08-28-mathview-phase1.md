@@ -32,6 +32,7 @@
 | `web/js/app.js` | state, fetch, wiring |
 | `web/js/steps.js` | step panel, view toggle |
 | `web/js/render/registry.js` | `kind` → renderer |
+| `web/js/render/scales.js` | axis bounds and pixel mapping |
 | `web/js/render/plot2d.js` | canvas plotting |
 | `tests/` | pytest, mirrors `src/` |
 
@@ -2614,6 +2615,7 @@ git commit -m "feat: add palette tokens and page shell"
 
 **Files:**
 - Create: `web/js/render/registry.js`
+- Create: `web/js/render/scales.js`
 - Create: `web/js/render/plot2d.js`
 
 No JS tests, per the logic-in-Python rule — this file receives finished numbers
@@ -2655,23 +2657,16 @@ export function render(canvas, spec, options) {
 }
 ```
 
-- [ ] **Step 2: Write `web/js/render/plot2d.js`**
+- [ ] **Step 2: Write `web/js/render/scales.js`**
 
 ```javascript
-// Cartesian plotting. Receives finished numbers from Python - it computes no
-// maths of its own, only the pixel mapping.
-
-import { registerRenderer } from "./registry.js";
+// Turning data ranges into pixel positions. Separate from the drawing because
+// the choice of axis bounds is the part with judgement in it: where to anchor,
+// when a dip below zero is noise, and how a log axis floors.
 
 const PAD = { left: 64, right: 16, top: 16, bottom: 40 };
 
-function token(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
-function seriesColour(slot) {
-  return token(`--s${slot % 6}`);
-}
+export { PAD };
 
 function yBounds(spec, logMode) {
   let lo = Infinity;
@@ -2685,7 +2680,9 @@ function yBounds(spec, logMode) {
       if (y > 0 && y < loPositive) loPositive = y;
     }
   }
-  if (lo === Infinity) return [0, 1];
+  // A log axis cannot start at zero: log10(0) is -Infinity and every axis
+  // label downstream becomes NaN.
+  if (lo === Infinity) return logMode ? [1, 10] : [0, 1];
 
   if (logMode) {
     const top = hi > 0 ? hi : 1;
@@ -2695,20 +2692,31 @@ function yBounds(spec, logMode) {
     return [bottom === top ? top / 10 : bottom, top];
   }
 
-  // A curve that dips a hair below zero - log(n) near n=0, against 2^n at
-  // 1e15 - must not stretch the axis into the negatives, or every other curve
-  // flattens onto the baseline.
-  if (lo >= 0 || (hi > 0 && -lo < hi * 0.02)) lo = 0;
-  else {
-    const pad = (hi - lo) * 0.08;
-    lo -= pad;
-    hi += pad;
+  const span = hi - lo;
+  if (lo >= 0) {
+    // Anchor to the baseline only when the data comes near it. A curve running
+    // 5.01 to 5.99 drawn on a 0-6 axis reads as a flat line, hiding a fifth of
+    // its own variation - misleading in a tool for looking at how functions
+    // behave.
+    if (lo <= span) lo = 0;
+    else {
+      lo -= span * 0.08;
+      hi += span * 0.08;
+    }
+  } else if (hi > 0 && -lo < hi * 0.02) {
+    // A dip a hair below zero - log(n) near n=0, against 2^n at 1e15 - must
+    // not stretch the axis into the negatives, or every other curve flattens
+    // onto the baseline.
+    lo = 0;
+  } else {
+    lo -= span * 0.08;
+    hi += span * 0.08;
   }
   if (hi === lo) hi = lo + 1;
   return [lo, hi];
 }
 
-function makeScales(spec, width, height, logMode) {
+export function makeScales(spec, width, height, logMode) {
   const [x0, x1] = spec.xrange;
   const [lo, hi] = yBounds(spec, logMode);
   const plotWidth = width - PAD.left - PAD.right;
@@ -2727,6 +2735,24 @@ function makeScales(spec, width, height, logMode) {
           : PAD.top + plotHeight - ((Math.log10(v) - a) / (b - a)) * plotHeight
         : PAD.top + plotHeight - ((v - lo) / (hi - lo)) * plotHeight,
   };
+}
+```
+
+- [ ] **Step 3: Write `web/js/render/plot2d.js`**
+
+```javascript
+// Cartesian plotting. Receives finished numbers from Python - it computes no
+// maths of its own, only the pixel mapping.
+
+import { registerRenderer } from "./registry.js";
+import { makeScales, PAD } from "./scales.js";
+
+function token(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function seriesColour(slot) {
+  return token(`--s${slot % 6}`);
 }
 
 function label(value, logMode) {
@@ -2854,7 +2880,7 @@ registerRenderer("plot2d", (context, width, height, spec, options = {}) => {
 });
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add web/js/render
