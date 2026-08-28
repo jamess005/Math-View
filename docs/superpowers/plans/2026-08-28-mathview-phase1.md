@@ -377,6 +377,21 @@ def test_calling_an_undefined_function_is_rejected():
 
     assert "g" in excinfo.value.message
     assert excinfo.value.offset == 2
+
+
+def test_a_digit_prefixed_call_is_still_checked():
+    # `\b` is not a boundary between two word characters, and a digit is one,
+    # so `2f(x)` hid the call entirely and became the product 2*f*x.
+    with pytest.raises(ParseError):
+        parse_expression("2f(x)", "x")
+
+
+def test_non_callable_sympy_names_are_rejected():
+    # pi, E, I, oo and nan are all names in SymPy's namespace but none are
+    # callable; nan(x) quietly became nan, dropping the argument entirely.
+    for text in ["E(x)", "pi(x)", "nan(x)", "oo(x)"]:
+        with pytest.raises(ParseError):
+            parse_expression(text, "x")
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -427,8 +442,10 @@ _SAFE_GLOBALS: dict[str, object] = {
 }
 _SAFE_GLOBALS["__builtins__"] = {}
 
-# Anything of the form `name(` in user text.
-_CALL = re.compile(r"\b([A-Za-z]\w*)\s*\(")
+# Anything of the form `name(` in user text. `\b` will not do: it is not a
+# boundary between two word characters, and a digit is one - so `2f(x)` would
+# hide the call entirely and slip straight back into being the product 2*f*x.
+_CALL = re.compile(r"(?:(?<=[^A-Za-z_])|^)([A-Za-z]\w*)\s*\(")
 
 
 class ParseError(Exception):
@@ -442,6 +459,16 @@ class ParseError(Exception):
 
     def to_dict(self) -> dict[str, object]:
         return {"error": self.message, "offset": self.offset, "input": self.text}
+
+
+def is_builtin_name(name: str) -> bool:
+    """True if `name` already means something in SymPy's namespace.
+
+    Definitions must refuse these. SymPy's parser rewrites bare identifiers into
+    Symbol(...) calls, so a row named `Symbol` intercepts those and corrupts the
+    parse of every other row; shadowing `log` or `sqrt` is merely confusing.
+    """
+    return name in _SAFE_GLOBALS
 
 
 def parse_expression(
@@ -462,7 +489,12 @@ def parse_expression(
     known = functions or {}
     for match in _CALL.finditer(stripped):
         name = match.group(1)
-        if name not in known and name not in _SAFE_GLOBALS:
+        if name in known:
+            continue
+        # Membership in the SymPy namespace is not enough: pi, E, I, oo and nan
+        # are all names there but none are callable, so `nan(x)` quietly became
+        # `nan` with the argument dropped entirely.
+        if not callable(_SAFE_GLOBALS.get(name)):
             raise ParseError(
                 f"no function named {name} is defined yet", match.start(1), text
             )
@@ -513,7 +545,7 @@ def free_parameters(expr: sympy.Expr, variable: str) -> list[str]:
 uv run pytest tests/test_parse.py -v
 ```
 
-Expected: 11 passed
+Expected: 13 passed
 
 - [ ] **Step 5: Commit**
 
@@ -1633,6 +1665,34 @@ def test_a_parameter_is_not_mistaken_for_a_function():
 def test_no_rows_is_a_parse_error():
     with pytest.raises(ParseError):
         parse_definitions([])
+
+
+def test_a_builtin_name_cannot_be_redefined():
+    # SymPy's parser rewrites bare identifiers into Symbol(...) calls, so a row
+    # named Symbol intercepts those and corrupts every other row's parse.
+    with pytest.raises(ParseError):
+        parse_definitions(["Symbol(x) = x^2", "g(x) = x + 1"])
+
+
+def test_shadowing_a_sympy_function_is_rejected():
+    with pytest.raises(ParseError):
+        parse_definitions(["log(x) = x^2"])
+
+
+def test_a_repeated_name_is_rejected():
+    # Keeping only the last would retroactively change what earlier rows mean:
+    # g, written against f(x) = x, would expand using f(x) = 2x.
+    with pytest.raises(ParseError):
+        parse_definitions(["f(x) = x", "g(x) = f(x) + 1", "f(x) = 2x"])
+
+
+def test_deep_nesting_is_not_reported_as_a_circle():
+    # 17 strictly acyclic levels used to hit a fixed bound of 16 and be
+    # reported as a circular reference.
+    rows = ["f1(x) = x + 1"] + [f"f{i}(x) = f{i - 1}(x) + 1" for i in range(2, 18)]
+    definitions = parse_definitions(rows)
+
+    assert expand(definitions["f17"].body, definitions) == sympy.Symbol("x") + 17
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1660,16 +1720,9 @@ from dataclasses import dataclass
 import sympy
 from sympy.core.function import AppliedUndef
 
-from mathview.core.parse import ParseError, parse_expression
+from mathview.core.parse import ParseError, is_builtin_name, parse_expression
 
 _LHS = re.compile(r"^\s*([A-Za-z]\w*)\s*\(\s*([A-Za-z]\w*)\s*\)\s*$")
-
-# Bounds substitution so a cycle terminates with an error instead of hanging.
-# parse_definitions only lets a row call names defined on earlier rows, so the
-# reference graph it produces is a DAG and a cycle can't reach this guard that
-# way; it stays as defence for a Definition dict built by hand rather than
-# through parse_definitions.
-_MAX_EXPANSIONS = 16
 
 
 @dataclass(frozen=True)
@@ -1696,6 +1749,10 @@ def parse_definitions(rows: list[str]) -> dict[str, Definition]:
             raise ParseError("the left side must look like f(x)", 0, row)
 
         name, variable = match.group(1), match.group(2)
+        if name in definitions:
+            raise ParseError(f"{name} is already defined above", 0, row)
+        if is_builtin_name(name):
+            raise ParseError(f"{name} is a built-in name, choose another", 0, row)
         # Only names defined on EARLIER rows are callable here. That ordering is
         # what makes a forward reference an error rather than a silent product:
         # with `g` undeclared, implicit multiplication reads `g(x)` as `g * x`.
@@ -1710,7 +1767,11 @@ def parse_definitions(rows: list[str]) -> dict[str, Definition]:
 
 def expand(expr: sympy.Expr, definitions: dict[str, Definition]) -> sympy.Expr:
     """Replace every call to a defined name with that definition's body."""
-    for _ in range(_MAX_EXPANSIONS):
+    # One pass resolves one level of nesting, and a row can only call rows above
+    # it, so the chain is never deeper than the number of definitions. The bound
+    # is belt-and-braces for a hand-built dict containing a cycle; it cannot be
+    # reached through parse_definitions.
+    for _ in range(len(definitions) + 1):
         calls = [
             call
             for call in expr.atoms(AppliedUndef)
@@ -1725,9 +1786,7 @@ def expand(expr: sympy.Expr, definitions: dict[str, Definition]) -> sympy.Expr:
             )
             expr = expr.subs(call, substituted)
 
-    raise ParseError(
-        "these definitions refer to each other in a circle", 0, str(expr)
-    )
+    raise ParseError("these definitions nest too deeply to resolve", 0, str(expr))
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -1736,7 +1795,7 @@ def expand(expr: sympy.Expr, definitions: dict[str, Definition]) -> sympy.Expr:
 uv run pytest tests/test_definitions.py -v
 ```
 
-Expected: 10 passed
+Expected: 14 passed
 
 - [ ] **Step 5: Commit**
 
