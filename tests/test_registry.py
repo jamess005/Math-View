@@ -3,7 +3,7 @@
 import pytest
 
 from mathview.core.registry import (
-    UnknownTopic,
+    UnknownTopicError,
     available_topics,
     get_topic,
     register_topic,
@@ -22,7 +22,7 @@ def test_registered_topic_can_be_fetched():
 
 
 def test_unknown_topic_raises():
-    with pytest.raises(UnknownTopic):
+    with pytest.raises(UnknownTopicError):
         get_topic("no-such-topic")
 
 

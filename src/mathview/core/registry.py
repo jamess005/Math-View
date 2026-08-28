@@ -19,7 +19,7 @@ TopicGenerator = Callable[[list[str], dict[str, float]], Sequence]
 _TOPICS: dict[str, TopicGenerator] = {}
 
 
-class UnknownTopic(KeyError):  # noqa: N818 - deliberately a KeyError, not an *Error
+class UnknownTopicError(KeyError):
     """Asked for a topic nobody registered."""
 
 
@@ -31,7 +31,7 @@ def get_topic(name: str) -> TopicGenerator:
     try:
         return _TOPICS[name]
     except KeyError as exc:
-        raise UnknownTopic(name) from exc
+        raise UnknownTopicError(name) from exc
 
 
 def available_topics() -> list[str]:
