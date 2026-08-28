@@ -44,6 +44,34 @@ def _bisect(evaluate, low: float, low_value: float, high: float) -> float:
     return (low + high) / 2
 
 
+def meeting_point(
+    expr_a: sympy.Expr,
+    expr_b: sympy.Expr,
+    variable: str,
+    x: float,
+) -> float | None:
+    """The shared y where two curves meet, or None if they do not really meet.
+
+    find_crossovers reports a sign change in (a - b), and that also occurs
+    across a pole, where the curves are nowhere near each other: bisection
+    lands on the asymptote and subs() returns complex infinity. 1/(n-1)
+    against a constant crashed on exactly this. Both sides must be finite AND
+    equal there for the candidate to count as a crossing.
+    """
+    symbol = sympy.Symbol(variable)
+    try:
+        y_a = float(expr_a.subs(symbol, x))
+        y_b = float(expr_b.subs(symbol, x))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not (math.isfinite(y_a) and math.isfinite(y_b)):
+        return None
+    scale = max(1.0, abs(y_a), abs(y_b))
+    if abs(y_a - y_b) > 1e-6 * scale:
+        return None
+    return y_a
+
+
 def find_crossovers(
     expr_a: sympy.Expr,
     expr_b: sympy.Expr,

@@ -15,7 +15,7 @@ from mathview.core.parse import ParseError, parse_expression
 from mathview.core.registry import register_topic
 from mathview.core.step import Sequence, Step, VisualSpec
 from mathview.topics.asymptotics import classify, compare_growth, dominance_order
-from mathview.topics.crossover import find_crossovers
+from mathview.topics.crossover import find_crossovers, meeting_point
 from mathview.topics.sampling import sample_curve
 
 VARIABLE = "n"
@@ -92,28 +92,6 @@ def _step_small(parsed, n_max) -> Step:
     )
 
 
-def _meeting_point(expr_a: sympy.Expr, expr_b: sympy.Expr, x: float) -> float | None:
-    """The shared y where two curves meet, or None if they do not really meet.
-
-    A sign change in (a - b) also occurs across a pole, where the curves are
-    nowhere near each other: bisection lands on the asymptote and subs() returns
-    complex infinity. 1/(n-1) against a constant crashed on exactly this. Both
-    sides must be finite AND equal there for it to count.
-    """
-    symbol = sympy.Symbol(VARIABLE)
-    try:
-        y_a = float(expr_a.subs(symbol, x))
-        y_b = float(expr_b.subs(symbol, x))
-    except (TypeError, ValueError, OverflowError):
-        return None
-    if not (math.isfinite(y_a) and math.isfinite(y_b)):
-        return None
-    scale = max(1.0, abs(y_a), abs(y_b))
-    if abs(y_a - y_b) > 1e-6 * scale:
-        return None
-    return y_a
-
-
 def _step_crossovers(parsed, n_max) -> Step:
     markers: list[dict] = []
     sentences: list[str] = []
@@ -122,7 +100,7 @@ def _step_crossovers(parsed, n_max) -> Step:
             _, expr_a = parsed[i]
             _, expr_b = parsed[j]
             for x in find_crossovers(expr_a, expr_b, VARIABLE, 0.5, n_max):
-                y = _meeting_point(expr_a, expr_b, x)
+                y = meeting_point(expr_a, expr_b, VARIABLE, x)
                 if y is None:
                     continue
                 markers.append({"kind": "crossover", "x": float(x), "y": y})

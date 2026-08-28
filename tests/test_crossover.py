@@ -2,7 +2,7 @@
 
 import sympy
 
-from mathview.topics.crossover import find_crossovers
+from mathview.topics.crossover import find_crossovers, meeting_point
 
 
 def test_quadratic_overtakes_linear_at_the_known_point():
@@ -51,3 +51,17 @@ def test_a_crossing_exactly_at_stop_is_reported():
     n = sympy.Symbol("n")
 
     assert find_crossovers(n, sympy.Integer(15), "n", 5.0, 15.0) == [15.0]
+
+
+def test_meeting_point_rejects_a_pole():
+    # find_crossovers reports the sign change across 1/(n-1)'s asymptote; the
+    # curves are nowhere near each other there, so it is not a meeting point.
+    n = sympy.Symbol("n")
+
+    assert meeting_point(1 / (n - 1), sympy.Integer(1), "n", 1.0) is None
+
+
+def test_meeting_point_returns_the_shared_y_where_curves_really_meet():
+    n = sympy.Symbol("n")
+
+    assert meeting_point(n**2, 100 * n, "n", 100.0) == 10000.0
