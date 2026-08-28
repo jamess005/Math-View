@@ -21,6 +21,18 @@ TRANSFORMS = standard_transformations + (
     convert_xor,
 )
 
+# parse_expr() calls eval(), so the namespace it evaluates against is the
+# security boundary. Sympy's own docs warn against running it on unsanitised
+# input, and this module is exactly that - the front door for user-typed text.
+# Stripping __builtins__ removes the route to __import__ and the file and
+# network primitives behind it. Note Python re-inserts the real builtins into
+# any globals dict that lacks the key, so setting it explicitly to {} is
+# required - omitting the key is NOT the same thing.
+_SAFE_GLOBALS: dict[str, object] = {
+    name: getattr(sympy, name) for name in dir(sympy) if not name.startswith("_")
+}
+_SAFE_GLOBALS["__builtins__"] = {}
+
 
 class ParseError(Exception):
     """A parse failure the UI can render against the input box."""
@@ -43,7 +55,10 @@ def parse_expression(text: str, variable: str) -> sympy.Expr:
 
     try:
         expr = sympy.parsing.sympy_parser.parse_expr(
-            stripped, transformations=TRANSFORMS, evaluate=True
+            stripped,
+            transformations=TRANSFORMS,
+            global_dict=_SAFE_GLOBALS,
+            evaluate=True,
         )
     except SyntaxError as exc:
         # The transformations rewrite the source before Python compiles it, so
@@ -57,13 +72,17 @@ def parse_expression(text: str, variable: str) -> sympy.Expr:
         raise ParseError(
             f"unexpected syntax near here: {exc.msg}", offset, text
         ) from exc
-    except (TypeError, ValueError, AttributeError, RecursionError) as exc:
+    except Exception as exc:
+        # parse_expr is an eval-based third-party parser and its failure
+        # vocabulary is not a stable contract: unmatched parentheses alone
+        # raise tokenize.TokenError and IndexError, neither a SyntaxError
+        # subclass. Enumerating types means the next unlisted one reaches the
+        # user as a stack trace, so catch broadly and convert.
         raise ParseError(str(exc) or "could not parse expression", 0, text) from exc
 
     if not isinstance(expr, sympy.Expr):
         raise ParseError("that is not an expression", 0, text)
 
-    _ = sympy.Symbol(variable)  # validates the variable name is usable
     return expr
 
 

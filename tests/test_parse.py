@@ -53,3 +53,14 @@ def test_free_parameters_is_empty_for_a_plain_function():
     expr = parse_expression("x^2", "x")
 
     assert free_parameters(expr, "x") == []
+
+
+def test_unmatched_parentheses_are_parse_errors_not_crashes():
+    for text in ["(1+2", "1+2)", "((n"]:
+        with pytest.raises(ParseError):
+            parse_expression(text, "n")
+
+
+def test_builtins_are_not_reachable_from_parsed_input():
+    with pytest.raises(ParseError):
+        parse_expression('__import__("os").getpid()', "n")
