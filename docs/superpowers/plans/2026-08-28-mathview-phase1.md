@@ -500,7 +500,7 @@ git commit -m "feat: parse expressions with offset-carrying errors"
 import pytest
 
 from mathview.core.registry import (
-    UnknownTopic,
+    UnknownTopicError,
     available_topics,
     get_topic,
     register_topic,
@@ -519,7 +519,7 @@ def test_registered_topic_can_be_fetched():
 
 
 def test_unknown_topic_raises():
-    with pytest.raises(UnknownTopic):
+    with pytest.raises(UnknownTopicError):
         get_topic("no-such-topic")
 
 
@@ -564,7 +564,7 @@ TopicGenerator = Callable[[list[str], dict[str, float]], Sequence]
 _TOPICS: dict[str, TopicGenerator] = {}
 
 
-class UnknownTopic(KeyError):
+class UnknownTopicError(KeyError):
     """Asked for a topic nobody registered."""
 
 
@@ -576,7 +576,7 @@ def get_topic(name: str) -> TopicGenerator:
     try:
         return _TOPICS[name]
     except KeyError as exc:
-        raise UnknownTopic(name) from exc
+        raise UnknownTopicError(name) from exc
 
 
 def available_topics() -> list[str]:
@@ -1771,7 +1771,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from mathview.core.parse import ParseError
-from mathview.core.registry import UnknownTopic, available_topics, get_topic
+from mathview.core.registry import UnknownTopicError, available_topics, get_topic
 from mathview.topics import functions as _functions  # noqa: F401  (registers topic)
 from mathview.topics import growth as _growth  # noqa: F401  (registers topic)
 
@@ -1795,7 +1795,7 @@ def create_app() -> FastAPI:
     def sequence(request: SequenceRequest) -> dict:
         try:
             generator = get_topic(request.topic)
-        except UnknownTopic:
+        except UnknownTopicError:
             raise HTTPException(status_code=404, detail=f"no topic {request.topic!r}") from None
 
         try:
