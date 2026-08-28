@@ -72,6 +72,13 @@ main.notation-only #canvas-wrap { display: none; }
 .row { display: flex; gap: 0.35rem; }
 .row input { flex: 1; min-width: 0; }
 .row .swatch { width: 4px; border-radius: 2px; }
+.row .remove {
+  padding: 0.2rem 0.45rem;
+  color: var(--ink-muted);
+  line-height: 1;
+}
+.row .remove:hover:not(:disabled) { color: var(--red); border-color: var(--red); }
+button:disabled { opacity: 0.35; cursor: default; }
 
 .error {
   color: var(--red);

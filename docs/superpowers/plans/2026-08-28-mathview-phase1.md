@@ -2490,6 +2490,13 @@ main.notation-only #canvas-wrap { display: none; }
 .row { display: flex; gap: 0.35rem; }
 .row input { flex: 1; min-width: 0; }
 .row .swatch { width: 4px; border-radius: 2px; }
+.row .remove {
+  padding: 0.2rem 0.45rem;
+  color: var(--ink-muted);
+  line-height: 1;
+}
+.row .remove:hover:not(:disabled) { color: var(--red); border-color: var(--red); }
+button:disabled { opacity: 0.35; cursor: default; }
 
 .error {
   color: var(--red);
@@ -2995,6 +3002,12 @@ const DEFAULTS = {
   functions: ["f(x) = 2x", "g(x) = x^2", "h(x) = f(g(x))"],
 };
 
+const MAX_ROWS = 6;
+// Names the add button can reach for. A row may only call names defined above
+// it, and a repeated name is rejected, so a fixed literal would fail on the
+// second click.
+const NAME_POOL = "fghkpqrstuvw".split("");
+
 const canvas = document.getElementById("canvas");
 const logBox = document.getElementById("logscale");
 const rowsBox = document.getElementById("rows");
@@ -3058,6 +3071,13 @@ async function refresh() {
   renderParams();
 }
 
+function nextFreeName() {
+  const used = new Set(
+    rows.map((row) => (row.split("=")[0].match(/[A-Za-z]\w*/) || [])[0])
+  );
+  return NAME_POOL.find((name) => !used.has(name)) ?? "z";
+}
+
 function renderRows() {
   rowsBox.innerHTML = "";
   rows.forEach((value, i) => {
@@ -3072,9 +3092,17 @@ function renderRows() {
     input.value = value;
     input.oninput = () => { rows[i] = input.value; scheduleRefresh(); };
 
-    row.append(swatch, input);
+    const remove = document.createElement("button");
+    remove.className = "remove";
+    remove.textContent = "\u00d7";
+    remove.title = "remove this row";
+    remove.disabled = rows.length === 1;
+    remove.onclick = () => { rows.splice(i, 1); renderRows(); refresh(); };
+
+    row.append(swatch, input, remove);
     rowsBox.append(row);
   });
+  document.getElementById("add").disabled = rows.length >= MAX_ROWS;
 }
 
 function renderParams() {
@@ -3112,8 +3140,8 @@ function renderParams() {
 }
 
 document.getElementById("add").onclick = () => {
-  if (rows.length >= 6) return;
-  rows.push(topic() === "growth" ? "n" : `k(x) = x`);
+  if (rows.length >= MAX_ROWS) return;
+  rows.push(topic() === "growth" ? "n" : `${nextFreeName()}(x) = x`);
   renderRows();
   refresh();
 };
