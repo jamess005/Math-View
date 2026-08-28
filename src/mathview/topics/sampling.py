@@ -1,7 +1,7 @@
 """Turning an expression into points the frontend can stroke.
 
 Growth functions overflow fast - 2**n leaves float range around n = 1024 - and
-log is undefined below zero, so a sampler that raises on either would be
+log is undefined at or below zero, so a sampler that raises on either would be
 useless here. Both cases become a `None` y, which the renderer draws as a gap.
 """
 

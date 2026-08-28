@@ -31,3 +31,12 @@ def test_undefined_regions_become_none_gaps():
 
     assert points[0][1] is None
     assert points[-1][1] == 0.0
+
+
+def test_division_by_zero_becomes_a_gap():
+    n = sympy.Symbol("n")
+
+    points = sample_curve(1 / n, "n", 0.0, 2.0, count=3)
+
+    assert points[0] == [0.0, None]
+    assert points[-1][1] == 0.5
