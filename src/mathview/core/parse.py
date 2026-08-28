@@ -7,6 +7,8 @@ silently empty graph reaching the user is a bug.
 
 from __future__ import annotations
 
+import re
+
 import sympy
 from sympy.parsing.sympy_parser import (
     convert_xor,
@@ -33,6 +35,9 @@ _SAFE_GLOBALS: dict[str, object] = {
 }
 _SAFE_GLOBALS["__builtins__"] = {}
 
+# Anything of the form `name(` in user text.
+_CALL = re.compile(r"\b([A-Za-z]\w*)\s*\(")
+
 
 class ParseError(Exception):
     """A parse failure the UI can render against the input box."""
@@ -47,17 +52,35 @@ class ParseError(Exception):
         return {"error": self.message, "offset": self.offset, "input": self.text}
 
 
-def parse_expression(text: str, variable: str) -> sympy.Expr:
-    """Parse `text` into a SymPy expression, raising ParseError on failure."""
+def parse_expression(
+    text: str, variable: str, functions: dict[str, object] | None = None
+) -> sympy.Expr:
+    """Parse `text` into a SymPy expression, raising ParseError on failure.
+
+    `functions` names the user-defined functions that may be called. Declaring
+    them matters: with `g` unknown, the implicit-multiplication transformation
+    reads `g(x)` as `g * x`, so `f(g(x))` silently becomes `f*g*x` and
+    composition is impossible. Anything called but neither declared here nor a
+    known SymPy name is rejected rather than quietly turned into a product.
+    """
     stripped = text.strip()
     if not stripped:
         raise ParseError("empty expression", 0, text)
+
+    known = functions or {}
+    for match in _CALL.finditer(stripped):
+        name = match.group(1)
+        if name not in known and name not in _SAFE_GLOBALS:
+            raise ParseError(
+                f"no function named {name} is defined yet", match.start(1), text
+            )
 
     try:
         expr = sympy.parsing.sympy_parser.parse_expr(
             stripped,
             transformations=TRANSFORMS,
             global_dict=_SAFE_GLOBALS,
+            local_dict=dict(known),
             evaluate=True,
         )
     except SyntaxError as exc:

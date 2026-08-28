@@ -2,6 +2,7 @@
 
 import pytest
 import sympy
+from sympy.core.function import AppliedUndef
 
 from mathview.core.parse import ParseError, free_parameters, parse_expression
 
@@ -68,3 +69,21 @@ def test_builtins_are_not_reachable_from_parsed_input():
     # __builtins__ as the only thing standing between user text and eval.
     with pytest.raises(ParseError):
         parse_expression('n + __import__("os").getpid()*0', "n")
+
+
+def test_a_declared_function_parses_as_a_call_not_a_product():
+    # Without local_dict the implicit-multiplication transformation reads
+    # g(x) as g*x, so f(g(x)) becomes f*g*x and composition is impossible.
+    known = {"f": sympy.Function("f"), "g": sympy.Function("g")}
+
+    expr = parse_expression("f(g(x))", "x", known)
+
+    assert expr.atoms(AppliedUndef) == {expr, sympy.Function("g")(sympy.Symbol("x"))}
+
+
+def test_calling_an_undefined_function_is_rejected():
+    with pytest.raises(ParseError) as excinfo:
+        parse_expression("f(g(x))", "x", {"f": sympy.Function("f")})
+
+    assert "g" in excinfo.value.message
+    assert excinfo.value.offset == 2
