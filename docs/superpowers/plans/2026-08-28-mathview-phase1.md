@@ -645,6 +645,17 @@ def test_undefined_regions_become_none_gaps():
 
     assert points[0][1] is None
     assert points[-1][1] == 0.0
+
+
+def test_division_by_zero_becomes_a_gap():
+    # The fourth member of the except tuple needs a witness, and this is not a
+    # contrived one: n = 0 is the growth topic's default range start.
+    n = sympy.Symbol("n")
+
+    points = sample_curve(1 / n, "n", 0.0, 2.0, count=3)
+
+    assert points[0] == [0.0, None]
+    assert points[-1][1] == 0.5
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -661,7 +672,7 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'mathview.topics.sampli
 """Turning an expression into points the frontend can stroke.
 
 Growth functions overflow fast - 2**n leaves float range around n = 1024 - and
-log is undefined below zero, so a sampler that raises on either would be
+log is undefined at or below zero, so a sampler that raises on either would be
 useless here. Both cases become a `None` y, which the renderer draws as a gap.
 """
 
@@ -715,7 +726,7 @@ def sample_curve(
 uv run pytest tests/test_sampling.py -v
 ```
 
-Expected: 3 passed
+Expected: 4 passed
 
 - [ ] **Step 5: Commit**
 
