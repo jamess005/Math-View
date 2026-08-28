@@ -2381,6 +2381,8 @@ that trade-off stated.
   /* Ground */
   --page: #08080a;
   --panel: #121215;
+  --panel-hi: #17171b;  /* header gradient top - a shade above --panel */
+  --panel-lo: #0e0e11;  /* step-panel gradient foot - toward --page   */
   --input: #1c1c21;
   --grid: #2a2a31;
   --border: rgba(255, 255, 255, 0.07);
@@ -2433,7 +2435,7 @@ header {
   align-items: center;
   gap: 1rem;
   padding: 0.75rem 1rem;
-  background: linear-gradient(180deg, #17171b, var(--panel));
+  background: linear-gradient(180deg, var(--panel-hi), var(--panel));
   border-bottom: 1px solid var(--border);
 }
 
@@ -2500,7 +2502,7 @@ canvas { display: block; width: 100%; height: 100%; }
 
 /* Step panel */
 #steps {
-  background: linear-gradient(180deg, var(--panel), #0e0e11);
+  background: linear-gradient(180deg, var(--panel), var(--panel-lo));
   border-top: 1px solid var(--border);
   padding: 0.75rem 1rem;
   max-height: 38vh;
@@ -2514,6 +2516,22 @@ body.visual-only #steps { display: none; }
 .step-prose { color: var(--ink-2); margin-top: 0.5rem; line-height: 1.5; }
 .step-notation { margin-top: 0.5rem; overflow-x: auto; }
 .absent { color: var(--ink-muted); font-style: italic; }
+
+/* Slider row under the inputs */
+#params { display: flex; flex-direction: column; gap: 0.35rem; }
+#params label {
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+#params input[type="range"] { flex: 1; min-width: 0; accent-color: var(--red); }
+
+/* KaTeX inherits the page ink rather than its own default */
+.katex { color: var(--ink); }
+.step-notation .katex-display { margin: 0; }
 ```
 
 - [ ] **Step 4: Write `web/index.html`**
