@@ -8,6 +8,7 @@ silently empty graph reaching the user is a bug.
 from __future__ import annotations
 
 import re
+from tokenize import TokenError
 
 import sympy
 from sympy.parsing.sympy_parser import (
@@ -112,6 +113,12 @@ def parse_expression(
         raise ParseError(
             f"unexpected syntax near here: {exc.msg}", offset, text
         ) from exc
+    except (TokenError, IndexError) as exc:
+        # Unmatched brackets surface as tokenize.TokenError (too few closers) or
+        # IndexError (too many), and neither stringifies into anything a reader
+        # can act on - TokenError renders as a raw Python tuple, which the UI
+        # would show verbatim.
+        raise ParseError("check the brackets - they do not match", 0, text) from exc
     except Exception as exc:
         # parse_expr is an eval-based third-party parser and its failure
         # vocabulary is not a stable contract: unmatched parentheses alone

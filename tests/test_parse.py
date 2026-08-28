@@ -102,3 +102,13 @@ def test_non_callable_sympy_names_are_rejected():
     for text in ["E(x)", "pi(x)", "nan(x)", "oo(x)"]:
         with pytest.raises(ParseError):
             parse_expression(text, "x")
+
+
+def test_bracket_errors_are_readable():
+    # tokenize.TokenError stringifies as a raw Python tuple, and the API hands
+    # this message straight to the UI.
+    for text in ["(1+2", "1+2)", "((n", "sqrt(x"]:
+        with pytest.raises(ParseError) as excinfo:
+            parse_expression(text, "n")
+
+        assert excinfo.value.message == "check the brackets - they do not match"
