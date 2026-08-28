@@ -115,3 +115,15 @@ body.visual-only #steps { display: none; }
 /* KaTeX inherits the page ink rather than its own default */
 .katex { color: var(--ink); }
 .step-notation .katex-display { margin: 0; }
+
+/* Log-scale toggle */
+.toggle {
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+.toggle input { accent-color: var(--red); }

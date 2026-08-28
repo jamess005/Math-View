@@ -2532,6 +2532,18 @@ body.visual-only #steps { display: none; }
 /* KaTeX inherits the page ink rather than its own default */
 .katex { color: var(--ink); }
 .step-notation .katex-display { margin: 0; }
+
+/* Log-scale toggle */
+.toggle {
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+.toggle input { accent-color: var(--red); }
 ```
 
 - [ ] **Step 4: Write `web/index.html`**
@@ -2567,6 +2579,7 @@ body.visual-only #steps { display: none; }
     <div id="rail">
       <div id="rows"></div>
       <button id="add">+ add</button>
+      <label class="toggle"><input type="checkbox" id="logscale"> log scale</label>
       <div id="params"></div>
       <div id="error" class="error"></div>
     </div>
@@ -2606,6 +2619,14 @@ git commit -m "feat: add palette tokens and page shell"
 No JS tests, per the logic-in-Python rule — this file receives finished numbers
 and strokes paths. Verification is visual, in Task 16.
 
+**The y-scaling was corrected against real data before this task was dispatched.**
+An earlier draft computed only a maximum and mapped `v / yMax`, which put every
+negative value off-canvas — and the `functions` topic routinely produces them
+(`f(x) = 2x + 3` spans -17 to 23; `sin(x)` spans -1 to 1). It also had no log
+mode, so `2^n` at 1.1e15 flattened `n`, `n log n` and `n^2` onto the baseline.
+Both are fixed here and verified: all four real specs map entirely inside the
+plot box in both linear and log mode.
+
 - [ ] **Step 1: Write `web/js/render/registry.js`**
 
 ```javascript
@@ -2618,7 +2639,7 @@ export function registerRenderer(kind, fn) {
   renderers.set(kind, fn);
 }
 
-export function render(canvas, spec) {
+export function render(canvas, spec, options) {
   const context = canvas.getContext("2d");
   const ratio = window.devicePixelRatio || 1;
   canvas.width = canvas.clientWidth * ratio;
@@ -2628,7 +2649,9 @@ export function render(canvas, spec) {
 
   if (!spec) return;
   const renderer = renderers.get(spec.kind);
-  if (renderer) renderer(context, canvas.clientWidth, canvas.clientHeight, spec);
+  if (renderer) {
+    renderer(context, canvas.clientWidth, canvas.clientHeight, spec, options ?? {});
+  }
 }
 ```
 
@@ -2640,7 +2663,7 @@ export function render(canvas, spec) {
 
 import { registerRenderer } from "./registry.js";
 
-const PAD = { left: 56, right: 16, top: 16, bottom: 40 };
+const PAD = { left: 64, right: 16, top: 16, bottom: 40 };
 
 function token(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -2650,50 +2673,106 @@ function seriesColour(slot) {
   return token(`--s${slot % 6}`);
 }
 
-function yExtent(spec) {
-  let max = 0;
+function yBounds(spec, logMode) {
+  let lo = Infinity;
+  let hi = -Infinity;
+  let loPositive = Infinity;
   for (const curve of spec.curves) {
     for (const [, y] of curve.points) {
-      if (y !== null && Number.isFinite(y) && y > max) max = y;
+      if (y === null || !Number.isFinite(y)) continue;
+      if (y < lo) lo = y;
+      if (y > hi) hi = y;
+      if (y > 0 && y < loPositive) loPositive = y;
     }
   }
-  return max === 0 ? 1 : max * 1.08;
+  if (lo === Infinity) return [0, 1];
+
+  if (logMode) {
+    const top = hi > 0 ? hi : 1;
+    // Floor at the smallest positive sample: anything at or below zero has no
+    // log and is drawn as a gap, so it must not drag the axis down with it.
+    const bottom = loPositive < Infinity ? loPositive : top / 1e6;
+    return [bottom === top ? top / 10 : bottom, top];
+  }
+
+  // A curve that dips a hair below zero - log(n) near n=0, against 2^n at
+  // 1e15 - must not stretch the axis into the negatives, or every other curve
+  // flattens onto the baseline.
+  if (lo >= 0 || (hi > 0 && -lo < hi * 0.02)) lo = 0;
+  else {
+    const pad = (hi - lo) * 0.08;
+    lo -= pad;
+    hi += pad;
+  }
+  if (hi === lo) hi = lo + 1;
+  return [lo, hi];
 }
 
-function makeScales(spec, width, height) {
+function makeScales(spec, width, height, logMode) {
   const [x0, x1] = spec.xrange;
-  const yMax = yExtent(spec);
+  const [lo, hi] = yBounds(spec, logMode);
   const plotWidth = width - PAD.left - PAD.right;
   const plotHeight = height - PAD.top - PAD.bottom;
+  const a = logMode ? Math.log10(lo) : 0;
+  const b = logMode ? Math.log10(hi) : 0;
   return {
-    yMax,
+    lo,
+    hi,
+    logMode,
     x: (v) => PAD.left + ((v - x0) / (x1 - x0)) * plotWidth,
-    y: (v) => PAD.top + plotHeight - (v / yMax) * plotHeight,
+    y: (v) =>
+      logMode
+        ? v <= 0
+          ? null
+          : PAD.top + plotHeight - ((Math.log10(v) - a) / (b - a)) * plotHeight
+        : PAD.top + plotHeight - ((v - lo) / (hi - lo)) * plotHeight,
   };
+}
+
+function label(value, logMode) {
+  if (value === 0) return "0";
+  const magnitude = Math.abs(value);
+  if (logMode || magnitude >= 1e5 || magnitude < 1e-3) return value.toExponential(1);
+  return Number(value.toPrecision(4)).toString();
 }
 
 function drawAxes(context, spec, scales, width, height) {
   context.strokeStyle = token("--grid");
-  context.fillStyle = token("--ink-muted");
   context.lineWidth = 1;
   context.font = "11px ui-monospace, monospace";
+  const plotHeight = height - PAD.top - PAD.bottom;
 
   for (let i = 0; i <= 5; i++) {
-    const y = PAD.top + ((height - PAD.top - PAD.bottom) / 5) * i;
+    const py = PAD.top + (plotHeight / 5) * i;
     context.beginPath();
-    context.moveTo(PAD.left, y);
-    context.lineTo(width - PAD.right, y);
+    context.moveTo(PAD.left, py);
+    context.lineTo(width - PAD.right, py);
     context.stroke();
-    const value = scales.yMax * (1 - i / 5);
-    context.fillText(value.toPrecision(3), 4, y + 4);
+    const fraction = 1 - i / 5;
+    const value = scales.logMode
+      ? 10 ** (Math.log10(scales.lo) + fraction * (Math.log10(scales.hi) - Math.log10(scales.lo)))
+      : scales.lo + fraction * (scales.hi - scales.lo);
+    context.fillStyle = token("--ink-muted");
+    context.fillText(label(value, scales.logMode), 6, py + 4);
+  }
+
+  // The x-axis itself, only when zero is actually in view.
+  const zero = scales.y(0);
+  if (zero !== null && zero >= PAD.top && zero <= height - PAD.bottom) {
+    context.strokeStyle = token("--border");
+    context.lineWidth = 1.5;
+    context.beginPath();
+    context.moveTo(PAD.left, zero);
+    context.lineTo(width - PAD.right, zero);
+    context.stroke();
   }
 
   const [x0, x1] = spec.xrange;
+  context.fillStyle = token("--ink-muted");
   for (let i = 0; i <= 5; i++) {
     const value = x0 + ((x1 - x0) / 5) * i;
-    context.fillText(value.toPrecision(3), scales.x(value) - 10, height - 22);
+    context.fillText(label(value, false), scales.x(value) - 12, height - 22);
   }
-
   context.fillStyle = token("--ink-2");
   context.fillText(spec.xlabel ?? "x", width / 2, height - 6);
 }
@@ -2709,40 +2788,48 @@ function drawCurves(context, spec, scales) {
     context.beginPath();
     let pen = false;
     for (const [x, y] of curve.points) {
-      if (y === null) { pen = false; continue; }
+      const py = y === null ? null : scales.y(y);
+      if (py === null || !Number.isFinite(py)) {
+        pen = false;
+        continue;
+      }
       const px = scales.x(x);
-      const py = scales.y(y);
-      if (!pen) { context.moveTo(px, py); pen = true; } else { context.lineTo(px, py); }
+      if (pen) context.lineTo(px, py);
+      else {
+        context.moveTo(px, py);
+        pen = true;
+      }
     }
     context.stroke();
   }
   context.shadowBlur = 0;
 }
 
-function drawMarkers(context, spec, scales) {
+function drawMarkers(context, spec, scales, height) {
+  context.font = "11px ui-monospace, monospace";
   for (const marker of spec.markers ?? []) {
     const px = scales.x(marker.x);
     const py = scales.y(marker.y);
+    if (py === null || !Number.isFinite(py)) continue;
+    const foot = scales.y(0) ?? height - PAD.bottom;
+
     context.strokeStyle = token("--red");
     context.fillStyle = token("--red");
     context.shadowColor = token("--red");
     context.shadowBlur = 12;
-
     context.setLineDash([4, 4]);
     context.beginPath();
     context.moveTo(px, py);
-    context.lineTo(px, scales.y(0));
+    context.lineTo(px, Math.min(Math.max(foot, PAD.top), height - PAD.bottom));
     context.stroke();
     context.setLineDash([]);
-
     context.beginPath();
     context.arc(px, py, 4, 0, Math.PI * 2);
     context.fill();
     context.shadowBlur = 0;
 
     context.fillStyle = token("--ink");
-    context.font = "11px ui-monospace, monospace";
-    context.fillText(`${marker.label ?? ""} ${marker.x.toPrecision(4)}`, px + 8, py - 8);
+    context.fillText(`${marker.label ?? ""} ${label(marker.x, false)}`, px + 8, py - 8);
   }
 }
 
@@ -2758,11 +2845,11 @@ function drawLegend(context, spec) {
   }
 }
 
-registerRenderer("plot2d", (context, width, height, spec) => {
-  const scales = makeScales(spec, width, height);
+registerRenderer("plot2d", (context, width, height, spec, options = {}) => {
+  const scales = makeScales(spec, width, height, Boolean(options.logScale));
   drawAxes(context, spec, scales, width, height);
   drawCurves(context, spec, scales);
-  drawMarkers(context, spec, scales);
+  drawMarkers(context, spec, scales, height);
   drawLegend(context, spec);
 });
 ```
@@ -2883,6 +2970,7 @@ const DEFAULTS = {
 };
 
 const canvas = document.getElementById("canvas");
+const logBox = document.getElementById("logscale");
 const rowsBox = document.getElementById("rows");
 const paramsBox = document.getElementById("params");
 const errorBox = document.getElementById("error");
@@ -2896,7 +2984,9 @@ function topic() {
 
 function drawCurrentStep() {
   if (!state.sequence) return;
-  render(canvas, state.sequence.steps[state.index].visual);
+  render(canvas, state.sequence.steps[state.index].visual, {
+    logScale: logBox.checked,
+  });
 }
 
 function showError(detail) {
@@ -3013,6 +3103,10 @@ document.getElementById("topic").onchange = () => {
 for (const button of document.querySelectorAll(".views button")) {
   button.onclick = () => { applyView(button.dataset.view); drawCurrentStep(); };
 }
+
+// A log axis is a different mapping of numbers the page already has, so it
+// redraws locally - no request, no debounce, instant.
+logBox.onchange = drawCurrentStep;
 
 window.addEventListener("resize", drawCurrentStep);
 
