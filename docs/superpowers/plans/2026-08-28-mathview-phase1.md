@@ -1817,6 +1817,9 @@ git commit -m "feat: parse named definitions and expand compositions"
 ```python
 """Function exploration: sliders, and tracing a value through the hops."""
 
+import pytest
+
+from mathview.core.parse import ParseError
 from mathview.topics.functions import build
 
 
@@ -1855,6 +1858,37 @@ def test_last_row_is_the_one_traced():
     sequence = build(["f(x) = x + 1", "g(x) = x + 100"], {"x": 1})
 
     assert sequence.steps[-1].title == "g(1) = 101"
+
+
+def test_an_undefined_point_stops_the_trace_instead_of_crashing():
+    # The x slider runs -10 to 10, so sqrt below zero is reached by dragging.
+    # This used to raise TypeError: Cannot convert complex to float.
+    sequence = build(["f(x) = sqrt(x)"], {"x": -4})
+
+    assert sequence.steps[-1].title == "f(-4) is undefined"
+
+
+def test_division_by_zero_in_a_trace_is_not_a_crash():
+    sequence = build(["f(x) = 1/x"], {"x": 0})
+
+    assert "undefined" in sequence.steps[-1].title
+
+
+def test_an_undefined_hop_stops_a_composition_early():
+    rows = ["f(x) = sqrt(x)", "g(x) = 2x", "h(x) = g(f(x))"]
+
+    sequence = build(rows, {"x": -4})
+
+    assert _titles(sequence) == [
+        "The functions as entered",
+        "Input x = -4",
+        "f(-4) is undefined",
+    ]
+
+
+def test_no_rows_is_a_parse_error():
+    with pytest.raises(ParseError):
+        build([], {"x": 1})
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1876,6 +1910,8 @@ existing rows switches the trace to the composition without any extra control.
 
 from __future__ import annotations
 
+import math
+
 import sympy
 from sympy.core.function import AppliedUndef
 
@@ -1893,6 +1929,23 @@ def _substitute_parameters(expr: sympy.Expr, params: dict[str, float]) -> sympy.
         if name != "x":
             expr = expr.subs(sympy.Symbol(name), sympy.Float(value))
     return expr
+
+
+def _real_value(expr: sympy.Expr) -> float | None:
+    """`expr` as a real number, or None where it has none.
+
+    Tracing a value through a function lands on undefined points constantly:
+    the x slider runs -10 to 10, so sqrt(x) below zero and 1/x at zero are
+    reached by ordinary dragging. subs() returns a complex number or zoo there
+    and float() raises, so every one of those was a crash.
+    """
+    try:
+        number = complex(expr)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if abs(number.imag) > 1e-12 or not math.isfinite(number.real):
+        return None
+    return number.real
 
 
 def _call_chain(body: sympy.Expr, definitions: dict[str, Definition]) -> list[str]:
@@ -1977,33 +2030,40 @@ def build(rows: list[str], params: dict[str, float]) -> Sequence:
         ),
     ]
 
-    value = sympy.Float(x_value)
+    value = x_value
     for hop, name in enumerate(chain, start=2):
         definition = definitions[name]
         body = _substitute_parameters(
             expand(definition.body, definitions), params
         )
         previous = value
-        value = sympy.simplify(body.subs(sympy.Symbol(definition.variable), previous))
+        result = _real_value(body.subs(sympy.Symbol(definition.variable), previous))
+        if result is None:
+            steps.append(
+                Step(
+                    index=hop,
+                    title=f"{name}({previous:g}) is undefined",
+                    notation=rf"{name}({previous:g}) \notin \mathbb{{R}}",
+                    prose=(
+                        f"{name} has no real value at {previous:g}, so the trace "
+                        f"stops here. Move x, or check the domain."
+                    ),
+                    visual=_plot(definitions, params, markers=[]),
+                )
+            )
+            break
+        value = result
         steps.append(
             Step(
                 index=hop,
-                title=f"{name}({float(previous):g}) = {float(value):g}",
-                notation=(
-                    rf"{name}({float(previous):g}) = "
-                    rf"{sympy.latex(sympy.nsimplify(value).evalf(6))}"
-                ),
+                title=f"{name}({previous:g}) = {value:g}",
+                notation=rf"{name}({previous:g}) = {value:g}",
                 prose=f"Up to the curve of {name}, then across to the y-axis.",
                 visual=_plot(
                     definitions,
                     params,
                     markers=[
-                        {
-                            "kind": "hop",
-                            "x": float(previous),
-                            "y": float(value),
-                            "label": name,
-                        }
+                        {"kind": "hop", "x": previous, "y": value, "label": name}
                     ],
                 ),
             )
@@ -2021,7 +2081,7 @@ register_topic("functions", build)
 uv run pytest tests/test_functions.py -v
 ```
 
-Expected: 5 passed
+Expected: 9 passed
 
 - [ ] **Step 5: Commit**
 
