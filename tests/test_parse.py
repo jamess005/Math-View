@@ -62,5 +62,9 @@ def test_unmatched_parentheses_are_parse_errors_not_crashes():
 
 
 def test_builtins_are_not_reachable_from_parsed_input():
+    # The bare call returns an int, which the isinstance guard would reject for
+    # reasons unrelated to security - so it proves nothing. Wrapping it to
+    # return a clean Symbol gets it past that guard, leaving the stripped
+    # __builtins__ as the only thing standing between user text and eval.
     with pytest.raises(ParseError):
-        parse_expression('__import__("os").getpid()', "n")
+        parse_expression('n + __import__("os").getpid()*0', "n")
