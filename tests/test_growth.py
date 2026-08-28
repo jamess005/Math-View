@@ -77,3 +77,43 @@ def test_no_rows_is_a_parse_error():
 def test_too_many_rows_is_a_parse_error():
     with pytest.raises(ParseError):
         build(["n"] * (MAX_ROWS + 1), {})
+
+
+def test_a_pole_does_not_crash_and_is_not_a_crossing():
+    # A sign change across a pole is not a meeting point. Before the fix this
+    # raised TypeError: Cannot convert complex to float.
+    sequence = build(["1/(n-1)", "1"], {"n_max": 10})
+    markers = sequence.steps[2].visual.data["markers"]
+
+    # The genuine crossing at n = 2 survives; the pole at n = 1 does not.
+    assert len(markers) == 1
+    assert abs(markers[0]["x"] - 2.0) < 1e-6
+
+
+def test_curves_separated_by_a_pole_are_not_reported_as_crossing():
+    sequence = build(["1/n", "1/(n-5)"], {"n_max": 20})
+
+    assert sequence.steps[2].visual.data["markers"] == []
+    assert "do not cross" in sequence.steps[2].prose
+
+
+def test_crossover_prose_does_not_claim_which_function_is_faster():
+    # 2^n is the asymptotically worse function but is the LARGER one before
+    # their first crossing at n = 2, so any blanket claim is backwards here.
+    sequence = build(["2^n", "n^2"], {"n_max": 20})
+
+    assert "worse function is the faster" not in sequence.steps[2].prose
+    assert "eventually begins" in sequence.steps[2].prose
+
+
+def test_same_order_functions_are_not_a_strict_chain():
+    # n and 100n differ only by a constant, so neither overtakes the other.
+    sequence = build(["n", "100*n"], {})
+
+    assert sequence.steps[3].notation == r"n \sim 100 n"
+
+
+def test_non_positive_range_is_a_parse_error():
+    for bad in (0, -50):
+        with pytest.raises(ParseError):
+            build(["n", "n^2"], {"n_max": bad})

@@ -57,25 +57,36 @@ def classify(expr: sympy.Expr, variable: str) -> str:
     return "greater than n!"
 
 
+def compare_growth(expr_a: sympy.Expr, expr_b: sympy.Expr, variable: str) -> int:
+    """-1 if `expr_a` grows strictly slower, 1 if strictly faster, 0 if same order.
+
+    Same order covers a finite non-zero ratio limit - n and 100n differ only by a
+    constant, so neither ever overtakes the other. Callers that render an
+    ordering need that distinction: writing `n < 100n` would be false.
+    """
+    return _compare(expr_a, expr_b, sympy.Symbol(variable))
+
+
+def _compare(expr_a: sympy.Expr, expr_b: sympy.Expr, symbol: sympy.Symbol) -> int:
+    limit = _ratio_limit(expr_a, expr_b, symbol)
+    if limit is None:
+        # Known limitation: treating "SymPy could not decide" as "same order"
+        # makes the comparator non-transitive, so the result can depend on the
+        # order the caller listed the functions in. Every standard complexity
+        # class resolves symbolically, so this cannot fire for the inputs this
+        # topic is for; a numeric fallback was prototyped and rejected because
+        # it could not reliably separate O(1) from O(log n) without probing
+        # absurdly far out.
+        return 0
+    if limit.is_zero:
+        return -1
+    if limit.is_infinite:
+        return 1
+    # Finite non-zero: the same order, differing only by a constant factor.
+    return 0
+
+
 def dominance_order(exprs: list[sympy.Expr], variable: str) -> list[sympy.Expr]:
     """Sort `exprs` slowest-growing first."""
     symbol = sympy.Symbol(variable)
-
-    def compare(expr_a: sympy.Expr, expr_b: sympy.Expr) -> int:
-        limit = _ratio_limit(expr_a, expr_b, symbol)
-        if limit is None:
-            # Known limitation: treating "SymPy could not decide" as "same
-            # order" makes the comparator non-transitive, so the result can
-            # depend on the order the caller listed the functions in. Every
-            # standard complexity class resolves symbolically, so this cannot
-            # fire for the inputs this topic is for; a numeric fallback was
-            # prototyped and rejected because it could not reliably separate
-            # O(1) from O(log n) without probing absurdly far out.
-            return 0
-        if limit.is_zero:
-            return -1
-        if limit.is_infinite:
-            return 1
-        return 0
-
-    return sorted(exprs, key=cmp_to_key(compare))
+    return sorted(exprs, key=cmp_to_key(lambda a, b: _compare(a, b, symbol)))

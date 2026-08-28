@@ -7,12 +7,14 @@ the crossover is where that distinction becomes visible.
 
 from __future__ import annotations
 
+import math
+
 import sympy
 
 from mathview.core.parse import ParseError, parse_expression
 from mathview.core.registry import register_topic
 from mathview.core.step import Sequence, Step, VisualSpec
-from mathview.topics.asymptotics import classify, dominance_order
+from mathview.topics.asymptotics import classify, compare_growth, dominance_order
 from mathview.topics.crossover import find_crossovers
 from mathview.topics.sampling import sample_curve
 
@@ -90,6 +92,28 @@ def _step_small(parsed, n_max) -> Step:
     )
 
 
+def _meeting_point(expr_a: sympy.Expr, expr_b: sympy.Expr, x: float) -> float | None:
+    """The shared y where two curves meet, or None if they do not really meet.
+
+    A sign change in (a - b) also occurs across a pole, where the curves are
+    nowhere near each other: bisection lands on the asymptote and subs() returns
+    complex infinity. 1/(n-1) against a constant crashed on exactly this. Both
+    sides must be finite AND equal there for it to count.
+    """
+    symbol = sympy.Symbol(VARIABLE)
+    try:
+        y_a = float(expr_a.subs(symbol, x))
+        y_b = float(expr_b.subs(symbol, x))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not (math.isfinite(y_a) and math.isfinite(y_b)):
+        return None
+    scale = max(1.0, abs(y_a), abs(y_b))
+    if abs(y_a - y_b) > 1e-6 * scale:
+        return None
+    return y_a
+
+
 def _step_crossovers(parsed, n_max) -> Step:
     markers: list[dict] = []
     sentences: list[str] = []
@@ -98,16 +122,22 @@ def _step_crossovers(parsed, n_max) -> Step:
             _, expr_a = parsed[i]
             _, expr_b = parsed[j]
             for x in find_crossovers(expr_a, expr_b, VARIABLE, 0.5, n_max):
-                y = expr_a.subs(sympy.Symbol(VARIABLE), x)
-                markers.append({"kind": "crossover", "x": float(x), "y": float(y)})
+                y = _meeting_point(expr_a, expr_b, x)
+                if y is None:
+                    continue
+                markers.append({"kind": "crossover", "x": float(x), "y": y})
                 sentences.append(
                     f"{sympy.latex(expr_a)} and {sympy.latex(expr_b)} cross at "
                     f"n = {x:g}."
                 )
 
+    # The old wording claimed the asymptotically worse function is faster
+    # before a crossing. That is backwards for 2^n against n^2, which is larger
+    # than n^2 everywhere before their first crossing at n = 2.
     prose = (
         " ".join(sentences)
-        + " Before a crossing, the asymptotically worse function is the faster one."
+        + " Asymptotic order says which function wins eventually;"
+        + " a crossing is where eventually begins."
         if sentences
         else "These functions do not cross in this range."
     )
@@ -122,12 +152,20 @@ def _step_crossovers(parsed, n_max) -> Step:
 
 def _step_dominance(parsed, n_max) -> Step:
     ordered = dominance_order([expr for _, expr in parsed], VARIABLE)
-    chain = r" \prec ".join(sympy.latex(expr) for expr in ordered)
+    parts = [sympy.latex(ordered[0])]
+    for earlier, later in zip(ordered, ordered[1:], strict=False):
+        # `n \prec 100n` would be false - they differ only by a constant, so
+        # neither ever overtakes the other. Same-order pairs get \sim.
+        strict = compare_growth(earlier, later, VARIABLE) < 0
+        parts.append((r" \prec " if strict else r" \sim ") + sympy.latex(later))
     return Step(
         index=3,
         title="Dominance chain",
-        notation=chain,
-        prose="Slowest-growing first. Each is eventually overtaken by the next.",
+        notation="".join(parts),
+        prose=(
+            "Slowest-growing first. ≺ means eventually overtaken; "
+            "∼ means the same order, differing only by a constant factor."
+        ),
         visual=_plot(parsed, n_max),
     )
 
@@ -151,6 +189,10 @@ def build(rows: list[str], params: dict[str, float]) -> Sequence:
     """Build the five-step growth comparison sequence."""
     parsed = _parse_rows(rows)
     n_max = float(params.get("n_max", 50))
+    if not math.isfinite(n_max) or n_max <= 0:
+        # n is an input size. A zero or negative range produced a degenerate
+        # plot and reported the bisection tolerance (1e-09) as a real crossing.
+        raise ParseError("the range of n must be greater than zero", 0, "")
 
     return Sequence(
         topic="growth",
