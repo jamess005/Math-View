@@ -1436,11 +1436,13 @@ def _plot(
 ) -> VisualSpec:
     curves = [
         {
-            "label": sympy.latex(expr),
+            # The canvas legend is plain fillText, so this must be the row as
+            # typed, not sympy.latex - that renders as "n \\log{\\left(n \\right)}".
+            "label": row,
             "slot": slot,
             "points": sample_curve(expr, VARIABLE, 0.0, n_max),
         }
-        for slot, (_, expr) in enumerate(parsed)
+        for slot, (row, expr) in enumerate(parsed)
     ]
     return VisualSpec(
         kind="plot2d",
@@ -2479,6 +2481,7 @@ main.notation-only #canvas-wrap { display: none; }
 
 #rail {
   background: var(--panel);
+  overflow-x: hidden;
   border-right: 1px solid var(--border);
   padding: 0.75rem;
   overflow-y: auto;
@@ -2502,7 +2505,11 @@ button:disabled { opacity: 0.35; cursor: default; }
   color: var(--red);
   font-family: var(--mono);
   font-size: 0.75rem;
+  /* `pre` keeps the caret under the character it points at, so the message
+     cannot wrap - it scrolls inside its own box rather than widening the rail. */
   white-space: pre;
+  overflow-x: auto;
+  max-width: 100%;
 }
 
 #canvas-wrap { position: relative; min-width: 0; }
@@ -2517,6 +2524,10 @@ canvas { display: block; width: 100%; height: 100%; }
   overflow-y: auto;
 }
 body.visual-only #steps { display: none; }
+
+/* Notation mode gives the steps the space the canvas gave up. */
+body.notation-only { grid-template-rows: auto auto 1fr; }
+body.notation-only #steps { max-height: none; }
 
 .step-nav { display: flex; align-items: center; gap: 0.75rem; }
 .step-title { color: var(--ink); font-weight: 600; }
@@ -2979,6 +2990,10 @@ export function renderSteps(onChange) {
 export function applyView(view) {
   state.view = view;
   document.body.classList.toggle("visual-only", view === "visual");
+  // Both classes are needed: one collapses the canvas column, the other hands
+  // the freed vertical space to the step panel. Without the second, notation
+  // mode leaves a large empty void where the canvas used to be.
+  document.body.classList.toggle("notation-only", view === "notation");
   document.getElementById("main").classList.toggle(
     "notation-only", view === "notation"
   );

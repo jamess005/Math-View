@@ -39,11 +39,13 @@ def _plot(
 ) -> VisualSpec:
     curves = [
         {
-            "label": sympy.latex(expr),
+            # The canvas legend is plain fillText, so this must be the row as
+            # typed, not sympy.latex - that renders as "n \\log{\\left(n \\right)}".
+            "label": row,
             "slot": slot,
             "points": sample_curve(expr, VARIABLE, 0.0, n_max),
         }
-        for slot, (_, expr) in enumerate(parsed)
+        for slot, (row, expr) in enumerate(parsed)
     ]
     return VisualSpec(
         kind="plot2d",

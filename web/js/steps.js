@@ -72,6 +72,10 @@ export function renderSteps(onChange) {
 export function applyView(view) {
   state.view = view;
   document.body.classList.toggle("visual-only", view === "visual");
+  // Both classes are needed: one collapses the canvas column, the other hands
+  // the freed vertical space to the step panel. Without the second, notation
+  // mode leaves a large empty void where the canvas used to be.
+  document.body.classList.toggle("notation-only", view === "notation");
   document.getElementById("main").classList.toggle(
     "notation-only", view === "notation"
   );
