@@ -2,7 +2,7 @@
 Name=MathView
 Comment=See how maths works: graphs and step-by-step derivations
 Exec=/home/james/uni/mathview/.venv/bin/mathview
-Icon=mathview
+Icon=accessories-calculator
 Terminal=false
 Type=Application
 Categories=Education;Math;

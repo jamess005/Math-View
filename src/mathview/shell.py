@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 
 def open_window(url: str, title: str = "MathView") -> None:
@@ -39,14 +38,11 @@ def open_window(url: str, title: str = "MathView") -> None:
                     QTimer.singleShot(0, lambda: page.setVisible(True))
 
     app = QApplication.instance() or QApplication(sys.argv[:1])
-    # Set the window's own icon: without _NET_WM_ICON the desktop falls back to
-    # a generic one, and every Python app looks alike in the taskbar.
+    # The window icon must be the same one the launcher uses, or the pinned
+    # entry and the open window show different pictures.
     app.setApplicationName("MathView")
     app.setDesktopFileName("mathview")
-    icon = QIcon.fromTheme("mathview")
-    if icon.isNull():
-        icon = QIcon(str(Path(__file__).resolve().parents[2] / "assets" / "mathview-256.png"))
-    app.setWindowIcon(icon)
+    app.setWindowIcon(QIcon.fromTheme("accessories-calculator"))
 
     view = _View()
     # Off-the-record profile: the default profile's disk cache can be left
