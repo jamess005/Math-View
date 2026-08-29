@@ -11,11 +11,15 @@ uv run mathview          # native window
 uv run mathview --web    # browser
 ```
 
-Install the launcher:
+Install the launcher so MathView appears in your applications menu:
 
 ```bash
 cp mathview.desktop ~/.local/share/applications/
+update-desktop-database ~/.local/share/applications
 ```
+
+`Exec` and `Path` in that file are absolute, so move the checkout and you will
+need to update both.
 
 ## Topics
 

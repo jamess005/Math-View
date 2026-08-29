@@ -5,6 +5,6 @@ Exec=/home/james/uni/mathview/.venv/bin/mathview
 Icon=accessories-calculator
 Terminal=false
 Type=Application
-Categories=Education;Science;Math;
+Categories=Education;Math;
 StartupNotify=true
 Path=/home/james/uni/mathview
