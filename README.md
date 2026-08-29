@@ -26,6 +26,12 @@ cp mathview.desktop ~/.local/share/applications/
   trace a value through the hops. Compositions are written directly:
   `h(x) = f(g(x))`. A row may only call names defined above it.
 
+## Offline
+
+Everything is vendored — KaTeX ships in `web/vendor/katex` (the two dist files
+byte-identical to upstream 0.16.11, woff2 fonts only). The app makes no network
+request at all, so notation renders on a train.
+
 ## Design
 
 - `docs/superpowers/specs/2026-08-28-mathview-design.md` — the design
@@ -37,9 +43,6 @@ cp mathview.desktop ~/.local/share/applications/
 
 ## Known limitations
 
-- **Maths notation needs an internet connection.** KaTeX loads from a CDN, so
-  the notation view falls back to raw LaTeX offline. Vendoring KaTeX locally
-  would fix it.
 - `dominance_order` treats a growth comparison SymPy cannot decide as "same
   order", which is not transitive. Every standard complexity class resolves
   symbolically, so this cannot fire for the inputs the topic is for.

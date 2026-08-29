@@ -5,10 +5,11 @@
   <title>MathView</title>
   <link rel="stylesheet" href="/static/css/tokens.css">
   <link rel="stylesheet" href="/static/css/app.css">
-  <link rel="stylesheet"
-        href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
-  <script defer
-          src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <!-- KaTeX 0.16.11, vendored so notation renders without a network. The two
+       dist files are byte-identical to upstream; fonts are woff2 only, which
+       is the format the CSS lists first and every target browser supports. -->
+  <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
+  <script defer src="/static/vendor/katex/katex.min.js"></script>
 </head>
 <body>
   <header>
