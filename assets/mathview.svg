@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <title>MathView</title>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#17171b"/><stop offset="1" stop-color="#08080a"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="26" fill="url(#g)"
+        stroke="#2a2a31" stroke-width="2"/>
+  <!-- A crossing, not two parallel climbs: that is the whole point of the app,
+       and it gives a silhouette Stock Manager's rising pair cannot be confused
+       with at 24px. Linear starts high and stays shallow; the exponential
+       starts low and overtakes it. -->
+  <path d="M24 44 L104 82" stroke="#2cdcff" stroke-width="13" stroke-linecap="round" opacity="0.16"/>
+  <path d="M24 44 L104 82" stroke="#2cdcff" stroke-width="7" stroke-linecap="round" fill="none"/>
+  <path d="M24 100 Q72 98 88 62 T104 22" stroke="#ff8734" stroke-width="13"
+        stroke-linecap="round" fill="none" opacity="0.16"/>
+  <path d="M24 100 Q72 98 88 62 T104 22" stroke="#ff8734" stroke-width="7"
+        stroke-linecap="round" fill="none"/>
+  <!-- the crossover marker, in the chrome red -->
+  <circle cx="83" cy="71" r="16" fill="#ff2740" opacity="0.22"/>
+  <circle cx="83" cy="71" r="8" fill="#ff2740"/>
+</svg>
