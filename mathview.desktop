@@ -8,3 +8,4 @@ Type=Application
 Categories=Education;Math;
 StartupNotify=true
 Path=/home/james/uni/mathview
+StartupWMClass=mathview
