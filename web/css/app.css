@@ -9,7 +9,9 @@ body {
   font-family: var(--font);
   height: 100vh;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  /* header | canvas | drag handle | step panel. The last two are variables so
+     the handles can resize them without this file knowing how. */
+  grid-template-rows: auto 1fr 5px var(--steps-h, 260px);
 }
 
 /* Header */
@@ -55,9 +57,20 @@ input:focus, select:focus, button:focus {
 }
 
 /* Body: input rail + canvas */
-main { display: grid; grid-template-columns: 260px 1fr; min-height: 0; }
-main.notation-only { grid-template-columns: 260px 0; }
-main.notation-only #canvas-wrap { display: none; }
+main {
+  display: grid;
+  grid-template-columns: var(--rail-w, 260px) 5px 1fr;
+  min-height: 0;
+}
+main.notation-only { grid-template-columns: var(--rail-w, 260px) 0 0; }
+main.notation-only #canvas-wrap,
+main.notation-only #split-x { display: none; }
+
+/* Drag handles. Recessive until pointed at, then the chrome red. */
+.split { background: var(--border); }
+#split-x { cursor: col-resize; }
+#split-y { cursor: row-resize; }
+.split:hover, .split.dragging { background: var(--red); }
 
 #rail {
   background: var(--panel);
@@ -92,22 +105,32 @@ button:disabled { opacity: 0.35; cursor: default; }
   max-width: 100%;
 }
 
-#canvas-wrap { position: relative; min-width: 0; }
+/* min-height matters as much as min-width: without it a grid item refuses to
+   shrink below its content's intrinsic size, and a canvas takes that from its
+   width/height attributes - so the row stays tall and the canvas overhangs the
+   step panel below it. */
+#canvas-wrap {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
 canvas { display: block; width: 100%; height: 100%; }
 
 /* Step panel */
 #steps {
   background: linear-gradient(180deg, var(--panel), var(--panel-lo));
-  border-top: 1px solid var(--border);
   padding: 0.75rem 1rem;
-  max-height: 38vh;
   overflow-y: auto;
+  min-height: 0;
 }
-body.visual-only #steps { display: none; }
+body.visual-only #steps,
+body.visual-only #split-y { display: none; }
+body.visual-only { grid-template-rows: auto 1fr 0 0; }
 
 /* Notation mode gives the steps the space the canvas gave up. */
-body.notation-only { grid-template-rows: auto auto 1fr; }
-body.notation-only #steps { max-height: none; }
+/* Notation mode gives the steps every row the canvas gave up. */
+body.notation-only { grid-template-rows: auto auto 5px 1fr; }
 
 .step-nav { display: flex; align-items: center; gap: 0.75rem; }
 .step-title { color: var(--ink); font-weight: 600; }

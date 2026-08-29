@@ -53,6 +53,12 @@ Layout per mode:
 | Visual   | full bleed  | hidden       |
 | Both     | centre      | bottom       |
 
+In `Both`, the split is draggable: one handle between the input rail and the
+canvas, another between the canvas and the step panel, so a step with a large
+table can be given room without losing the graph. Double-clicking a handle
+restores its default. Sizes are remembered per browser in `localStorage` -
+they are a preference, not state the server holds.
+
 ### VisualSpec — the extension point
 
 Python never draws. Topic generators emit declarative data:

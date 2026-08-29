@@ -21,6 +21,12 @@ update-desktop-database ~/.local/share/applications
 `Exec` and `Path` in that file are absolute, so move the checkout and you will
 need to update both.
 
+## Layout
+
+In `Both` view the split is draggable - one handle beside the input rail, one
+above the step panel - so a step with a big table can take space from the graph
+and give it back. Double-click a handle to reset it.
+
 ## Topics
 
 - **Growth** — compare growth rates, with crossover points marked. Asymptotic

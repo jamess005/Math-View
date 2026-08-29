@@ -2,6 +2,7 @@
 
 import { render } from "./render/registry.js";
 import "./render/plot2d.js";
+import { initSplitters } from "./splitters.js";
 import { applyView, renderSteps, state } from "./steps.js";
 
 const DEFAULTS = {
@@ -168,6 +169,14 @@ for (const button of document.querySelectorAll(".views button")) {
 // A log axis is a different mapping of numbers the page already has, so it
 // redraws locally - no request, no debounce, instant.
 logBox.onchange = drawCurrentStep;
+
+// The canvas element changes size for reasons other than a window resize: a
+// step with a tall table grows the panel, and the drag handles resize it
+// directly. Without this the bitmap keeps its old size and the previous frame
+// shows through underneath the step panel.
+new ResizeObserver(drawCurrentStep).observe(canvas);
+
+initSplitters(drawCurrentStep);
 
 window.addEventListener("resize", drawCurrentStep);
 
